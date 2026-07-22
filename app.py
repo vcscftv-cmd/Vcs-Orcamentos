@@ -1,4 +1,5 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import sqlite3
 import datetime
 import requests
@@ -74,7 +75,6 @@ def iniciar_banco():
     )
     """)
     
-    # Migração automática caso a coluna criado_por não exista em bancos antigos
     try:
         cursor.execute("ALTER TABLE orcamentos ADD COLUMN criado_por TEXT")
         conn.commit()
@@ -468,11 +468,11 @@ if menu == "Criar Orçamento":
                 conn.close()
                 
                 registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para o cliente {cliente}")
+                st.session_state.carrinho = []
                 st.session_state.ultimo_orcamento_imprimir = num_orc
                 st.success(f"Orçamento nº {num_orc} salvo com sucesso no banco de dados!")
                 st.rerun()
 
-    # Se houver um orçamento recém-criado, exibe botão para abrir visualização de impressão/PDF
     if st.session_state.ultimo_orcamento_imprimir:
         st.markdown("---")
         st.success(f"🖨️ O último orçamento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto para impressão ou salvamento em PDF!")
@@ -497,72 +497,95 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
 
     if orc_dados:
         st.markdown("---")
-        col_voltar, col_info = st.columns([1, 4])
-        with col_voltar:
-            if st.button("⬅️ Voltar ao Sistema"):
-                st.session_state.modo_impressao = None
-                st.rerun()
-        with col_info:
-            st.info("💡 Dica: Para salvar em PDF ou Imprimir, clique no botão abaixo ou aperte **Ctrl + P** no seu teclado.")
+        if st.button("⬅️ Voltar ao Sistema"):
+            st.session_state.modo_impressao = None
+            st.rerun()
 
-        # HTML formatado estilo folha de orçamento profissional para impressão
         html_orcamento = f"""
-        <div style="background-color: white; color: black; padding: 30px; font-family: Arial, sans-serif; border: 1px solid #ccc; border-radius: 8px; max-width: 800px; margin: auto;">
-            <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px;">
-                <h1 style="margin: 0; color: #004080;">VCS Informática</h1>
-                <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Manutenção, Redes, CFTV e Suprimentos</p>
-                <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
-                <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
-            </div>
-            
-            <div style="margin-bottom: 20px; font-size: 14px;">
-                <p style="margin: 4px 0;"><strong>Data:</strong> {orc_dados[9]}</p>
-                <p style="margin: 4px 0;"><strong>Cliente:</strong> {orc_dados[2]}</p>
-                <p style="margin: 4px 0;"><strong>CPF/CNPJ:</strong> {orc_dados[3] or 'Não informado'}</p>
-                <p style="margin: 4px 0;"><strong>Telefone:</strong> {orc_dados[4] or 'Não informado'}</p>
-                <p style="margin: 4px 0;"><strong>Endereço:</strong> {orc_dados[5] or 'Não informado'}</p>
-            </div>
+        <!DOCTYPE html>
+        <html>
+        <head>
+            <meta charset="utf-8">
+            <title>Orçamento {orc_dados[1]}</title>
+            <style>
+                body {{ background-color: #f8f9fa; font-family: Arial, sans-serif; padding: 20px; }}
+                .sheet {{ background: white; color: black; padding: 40px; border: 1px solid #ddd; border-radius: 8px; max-width: 800px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }}
+                .header {{ text-align: center; border-bottom: 2px solid #004080; padding-bottom: 15px; margin-bottom: 25px; }}
+                .header h1 {{ margin: 0; color: #004080; }}
+                .btn-print {{ background-color: #004080; color: white; padding: 12px 20px; border: none; border-radius: 5px; cursor: pointer; font-size: 16px; font-weight: bold; display: block; margin: 0 auto 25px auto; }}
+                .btn-print:hover {{ background-color: #00264d; }}
+                table {{ width: 100%; border-collapse: collapse; margin-bottom: 25px; font-size: 14px; }}
+                th {{ background-color: #f2f2f2; border-bottom: 2px solid #ddd; padding: 10px; text-align: left; }}
+                td {{ padding: 10px; border-bottom: 1px solid #eee; }}
+                @media print {{
+                    body {{ background: white; padding: 0; }}
+                    .sheet {{ border: none; box-shadow: none; padding: 0; }}
+                    .btn-print {{ display: none; }}
+                }}
+            </style>
+        </head>
+        <body>
+            <div class="sheet">
+                <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar em PDF</button>
+                
+                <div class="header">
+                    <h1>VCS Informática</h1>
+                    <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Manutenção, Redes, CFTV e Suprimentos</p>
+                    <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
+                    <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
+                </div>
+                
+                <div style="margin-bottom: 20px; font-size: 14px;">
+                    <p style="margin: 4px 0;"><strong>Data:</strong> {orc_dados[9]}</p>
+                    <p style="margin: 4px 0;"><strong>Cliente:</strong> {orc_dados[2]}</p>
+                    <p style="margin: 4px 0;"><strong>CPF/CNPJ:</strong> {orc_dados[3] or 'Não informado'}</p>
+                    <p style="margin: 4px 0;"><strong>Telefone:</strong> {orc_dados[4] or 'Não informado'}</p>
+                    <p style="margin: 4px 0;"><strong>Endereço:</strong> {orc_dados[5] or 'Não informado'}</p>
+                </div>
 
-            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
-                <thead>
-                    <tr style="background-color: #f2f2f2; border-bottom: 2px solid #ddd;">
-                        <th style="padding: 8px; text-align: left;">Descrição do Item / Produto</th>
-                        <th style="padding: 8px; text-align: center;">Qtd</th>
-                        <th style="padding: 8px; text-align: right;">Preço Unit.</th>
-                        <th style="padding: 8px; text-align: right;">Subtotal</th>
-                    </tr>
-                </thead>
-                <tbody>
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Descrição do Item / Produto</th>
+                            <th style="text-align: center;">Qtd</th>
+                            <th style="text-align: right;">Preço Unit.</th>
+                            <th style="text-align: right;">Subtotal</th>
+                        </tr>
+                    </thead>
+                    <tbody>
         """
         
         for item in itens_dados:
             html_orcamento += f"""
-                    <tr style="border-bottom: 1px solid #eee;">
-                        <td style="padding: 8px;">{item[0]}</td>
-                        <td style="padding: 8px; text-align: center;">{item[1]}</td>
-                        <td style="padding: 8px; text-align: right;">{formatar_moeda(item[2])}</td>
-                        <td style="padding: 8px; text-align: right;">{formatar_moeda(item[3])}</td>
-                    </tr>
+                        <tr>
+                            <td>{item[0]}</td>
+                            <td style="text-align: center;">{item[1]}</td>
+                            <td style="text-align: right;">{formatar_moeda(item[2])}</td>
+                            <td style="text-align: right;">{formatar_moeda(item[3])}</td>
+                        </tr>
             """
 
         html_orcamento += f"""
-                </tbody>
-            </table>
+                    </tbody>
+                </table>
 
-            <div style="text-align: right; font-size: 16px; margin-bottom: 25px;">
-                <p style="margin: 5px 0;"><strong>Garantia:</strong> {orc_dados[6]}</p>
-                <p style="margin: 5px 0;"><strong>Validade da Proposta:</strong> {orc_dados[7]}</p>
-                <p style="margin: 5px 0;"><strong>Forma de Pagamento:</strong> {orc_dados[8]}</p>
-                <h2 style="color: #004080; margin-top: 15px;">Total Geral: {formatar_moeda(orc_dados[10])}</h2>
-            </div>
+                <div style="text-align: right; font-size: 16px; margin-bottom: 25px;">
+                    <p style="margin: 5px 0;"><strong>Garantia:</strong> {orc_dados[6]}</p>
+                    <p style="margin: 5px 0;"><strong>Validade da Proposta:</strong> {orc_dados[7]}</p>
+                    <p style="margin: 5px 0;"><strong>Forma de Pagamento:</strong> {orc_dados[8]}</p>
+                    <h2 style="color: #004080; margin-top: 15px;">Total Geral: {formatar_moeda(orc_dados[10])}</h2>
+                </div>
 
-            <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
-                <p>Obrigado pela preferência! Este orçamento foi emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else 'VCS Informática'}.</p>
+                <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
+                    <p>Obrigado pela preferência! Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else 'VCS Informática'}.</p>
+                </div>
             </div>
-        </div>
+        </body>
+        </html>
         """
         
-        st.markdown(html_orcamento, unsafe_allow_html=True)
+        # Renderiza a página formatada com botão direto de impressão/PDF
+        components.html(html_orcamento, height=850, scrolling=True)
         st.stop()
 
 # ---------------------------------------------------------
