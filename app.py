@@ -12,7 +12,6 @@ import os
 st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA
-# Coloque o nome do arquivo da sua logo na mesma pasta do app.py (ex: "logo.png" ou "logo.jpg")
 ARQUIVO_LOGO = "logo.png" 
 
 def obter_logo_base64():
@@ -21,11 +20,9 @@ def obter_logo_base64():
             return base64.b64encode(img_file.read()).decode()
     return None
 
-# Função para criptografar senhas por segurança
 def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
-# 1. BANCO DE DADOS E MIGRAÇÃO
 def iniciar_banco():
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
@@ -136,8 +133,7 @@ def gerar_numero_orcamento():
     conn.close()
     
     proximo_id = qtd + 1
-    data_hoje = datetime.datetime.now().strftime("%d-%m-%Y")
-    return f"Orcamento_{proximo_id:03d}-{data_hoje}"
+    return f"Orcamento_{proximo_id:03d}"
 
 def converter_para_float(texto_valor):
     try:
@@ -157,7 +153,6 @@ def formatar_moeda(valor):
     except:
         return "R$ 0,00"
 
-# CONTROLE DE SESSÃO E INATIVIDADE (10 MINUTOS = 600 SEGUNDOS)
 TEMPO_INATIVIDADE_MAX = 600 
 
 if "autenticado" not in st.session_state:
@@ -278,9 +273,9 @@ if menu == "Criar Orçamento":
         col_cad1, col_cad2 = st.columns(2)
         with col_cad1:
             cliente = st.text_input("Nome do Cliente", value=st.session_state.form_cliente)
-            documento = st.text_input("CPF ou CNPJ (Livre)", value=st.session_state.form_documento, placeholder="Digite como preferir")
+            documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 123.456.789-10", key="input_doc")
         with col_cad2:
-            telefone = st.text_input("Telefone / WhatsApp (Livre)", value=st.session_state.form_telefone, placeholder="Digite como preferir")
+            telefone = st.text_input("Telefone / Celular", value=st.session_state.form_telefone, placeholder="Ex: 71 9 9999-9999", key="input_tel")
             cep_input = st.text_input("CEP (Busca automática opcional)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
             
             endereco_buscado = ""
@@ -302,6 +297,48 @@ if menu == "Criar Orçamento":
                 st.success("Dados do cliente fixados com sucesso!")
             else:
                 st.error("Preencha o nome do cliente.")
+
+    components.html("""
+    <script>
+    const docInput = window.parent.document.querySelector('input[aria-label*="CPF ou CNPJ"]');
+    const telInput = window.parent.document.querySelector('input[aria-label*="Telefone"]');
+
+    if (docInput) {
+        docInput.addEventListener('input', function (e) {
+            let v = e.target.value.replace(/\\D/g, "");
+            if (v.length > 14) v = v.slice(0, 14);
+            if (v.length <= 11) {
+                v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
+                v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
+                v = v.replace(/(\\d{3})(\\d{1,2})$/, "$1-$2");
+            } else {
+                v = v.replace(/^(\\d{2})(\\d)/, "$1.$2");
+                v = v.replace(/^(\\d{2})\\.(\\d{3})(\\d)/, "$1.$2.$3");
+                v = v.replace(/\\.(\\d{3})(\\d)/, "$1/$2");
+                v = v.replace(/(\\d{4})(\\d{1,2})$/, "$1-$2");
+            }
+            e.target.value = v;
+            e.target.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+
+    if (telInput) {
+        telInput.addEventListener('input', function (e) {
+            let v = e.target.value.replace(/\\D/g, "");
+            if (v.length > 11) v = v.slice(0, 11);
+            if (v.length <= 10) {
+                v = v.replace(/(\\d{2})(\\d)/, "$1 $2");
+                v = v.replace(/(\\d{4})(\\d)/, "$1-$2");
+            } else {
+                v = v.replace(/(\\d{2})(\\d)/, "$1 $2 ");
+                v = v.replace(/(\\d{1})(\\d{4})(\\d)/, "$1 $2-$3");
+            }
+            e.target.value = v;
+            e.target.dispatchEvent(new Event('input', { bubbles: true }));
+        });
+    }
+    </script>
+    """, height=0)
 
     st.markdown("---")
     
@@ -452,10 +489,11 @@ if menu == "Criar Orçamento":
                     """, (num_orc, item["produto"], item["quantidade"], item["preco_unitario"], item["subtotal"]))
                 
                 if srv_instalacao == "Sim" and valor_instalacao > 0:
+                    nome_servico_final = desc_servico if desc_servico.strip() else "Serviço de Instalação"
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
                         VALUES (?, ?, ?, ?, ?)
-                    """, (num_orc, f"Serviço de Instalação: {desc_servico if desc_servico else 'Instalação padrão'}", 1, valor_instalacao, valor_instalacao))
+                    """, (num_orc, nome_servico_final, 1, valor_instalacao, valor_instalacao))
 
                 conn.commit()
                 conn.close()
@@ -751,7 +789,7 @@ elif menu == "Gerenciar Clientes":
                 with st.form(f"form_edit_cli_{c_nome}"):
                     novo_nome = st.text_input("Nome do Cliente", value=c_nome)
                     novo_doc = st.text_input("CPF ou CNPJ", value=c_doc or "")
-                    novo_tel = st.text_input("Telefone / WhatsApp", value=c_tel or "")
+                    novo_tel = st.text_input("Telefone / Celular", value=c_tel or "")
                     novo_end = st.text_input("Endereço", value=c_end or "")
                     
                     salvar_cli = st.form_submit_button("💾 Atualizar Dados do Cliente em todos os Orçamentos")
