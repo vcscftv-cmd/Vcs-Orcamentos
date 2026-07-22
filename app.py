@@ -105,7 +105,7 @@ def formatar_telefone(tel):
 
 # MENU LATERAL
 st.sidebar.title("🛠️ VCS Informática")
-menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos"])
+menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"])
 
 # ---------------------------------------------------------
 # TELA 1: CRIAR ORÇAMENTO
@@ -323,7 +323,7 @@ if menu == "Criar Orçamento":
                 st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
 
 # ---------------------------------------------------------
-# TELA 2: CONSULTAR ORÇAMENTOS
+# TELA 2: CONSULTAR ORÇAMENTOS (COM OPÇÃO DE EXCLUIR)
 # ---------------------------------------------------------
 elif menu == "Consultar Orçamentos":
     st.subheader("🔍 Consultar e Pesquisar Orçamentos")
@@ -361,13 +361,25 @@ elif menu == "Consultar Orçamentos":
                 for item in itens:
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
+                st.markdown("---")
+                if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
+                    conn = sqlite3.connect("banco_vcs.db")
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
+                    cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Orçamento {orc[1]} excluído com sucesso!")
+                    st.rerun()
+
 # ---------------------------------------------------------
-# TELA 3: GERENCIAR PRODUTOS
+# TELA 3: GERENCIAR PRODUTOS (COM EDIÇÃO E EXCLUSÃO)
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
     
     with st.form("cad_prod"):
+        st.markdown("### Cadastrar Novo Produto")
         codigo = st.text_input("Código do Produto")
         descricao = st.text_input("Descrição do Produto")
         preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
@@ -383,18 +395,109 @@ elif menu == "Gerenciar Produtos":
                     conn.commit()
                     conn.close()
                     st.success("Produto cadastrado com sucesso!")
+                    st.rerun()
                 except Exception as e:
                     st.error(f"Erro ao cadastrar (código duplicado?): {e}")
             else:
                 st.error("Preencha a descrição e um preço válido.")
 
     st.markdown("---")
-    st.subheader("Lista de Produtos Cadastrados")
+    st.subheader("Lista e Edição de Produtos Cadastrados")
+    
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT codigo, descricao, preco, categoria FROM produtos")
+    cursor.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
     prods = cursor.fetchall()
     conn.close()
+
+    if not prods:
+        st.info("Nenhum produto cadastrado.")
+    else:
+        for p in prods:
+            p_id, p_cod, p_desc, p_preco, p_cat = p
+            with st.expander(f"[{p_cod}] {p_desc} - {formatar_moeda(p_preco)} ({p_cat})"):
+                with st.form(f"form_edit_prod_{p_id}"):
+                    novo_desc = st.text_input("Editar Descrição", value=p_desc, key=f"desc_{p_id}")
+                    
+                    # Campo de texto flexível para preço formatado
+                    txt_novo_preco = st.text_input("Editar Preço (R$)", value=str(p_preco).replace('.', ','), key=f"preco_{p_id}")
+                    
+                    nova_cat = st.selectbox("Editar Categoria", ["CFTV", "Informática"], index=0 if p_cat == "CFTV" else 1, key=f"cat_{p_id}")
+                    
+                    col_b1, col_b2 = st.columns(2)
+                    with col_b1:
+                        salvar_edicao = st.form_submit_button("💾 Salvar Alterações")
+                    with col_b2:
+                        excluir_prod = st.form_submit_button("🗑️ Excluir Produto")
+
+                    if salvar_edicao:
+                        preco_convertido = converter_para_float(txt_novo_preco)
+                        if novo_desc and preco_convertido > 0:
+                            conn = sqlite3.connect("banco_vcs.db")
+                            cursor = conn.cursor()
+                            cursor.execute("UPDATE produtos SET descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_desc, preco_convertido, nova_cat, p_id))
+                            conn.commit()
+                            conn.close()
+                            st.success("Produto atualizado com sucesso!")
+                            st.rerun()
+                        else:
+                            st.error("Preencha uma descrição e um preço válidos.")
+
+                    if excluir_prod:
+                        conn = sqlite3.connect("banco_vcs.db")
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
+                        conn.commit()
+                        conn.close()
+                        st.success("Produto excluído com sucesso!")
+                        st.rerun()
+
+# ---------------------------------------------------------
+# TELA 4: GERENCIAR / PESQUISAR CLIENTES (COM EDIÇÃO)
+# ---------------------------------------------------------
+elif menu == "Gerenciar Clientes":
+    st.subheader("👥 Pesquisa e Gerenciamento de Clientes")
     
-    for p in prods:
-        st.text(f"[{p[0]}] {p[1]} - {formatar_moeda(p[2])} ({p[3]})")
+    pesq_cliente = st.text_input("Pesquisar Cliente por Nome ou CPF/CNPJ:")
+
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    
+    if pesq_cliente:
+        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos WHERE cliente LIKE ? OR documento LIKE ?", (f"%{pesq_cliente}%", f"%{pesq_cliente}%"))
+    else:
+        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
+        
+    clientes_encontrados = cursor.fetchall()
+    conn.close()
+
+    if not clientes_encontrados:
+        st.info("Nenhum cliente encontrado nos orçamentos salvos.")
+    else:
+        for cli in clientes_encontrados:
+            c_nome, c_doc, c_tel, c_end = cli
+            with st.expander(f"Cliente: {c_nome} | Doc: {c_doc or 'Não informado'}"):
+                with st.form(f"form_edit_cli_{c_nome}"):
+                    novo_nome = st.text_input("Nome do Cliente", value=c_nome)
+                    novo_doc = st.text_input("CPF ou CNPJ", value=c_doc or "")
+                    novo_tel = st.text_input("Telefone / WhatsApp", value=c_tel or "")
+                    novo_end = st.text_input("Endereço", value=c_end or "")
+                    
+                    salvar_cli = st.form_submit_button("💾 Atualizar Dados do Cliente em todos os Orçamentos")
+                    
+                    if salvar_cli:
+                        if not novo_nome:
+                            st.error("O nome do cliente não pode ficar vazio.")
+                        else:
+                            conn = sqlite3.connect("banco_vcs.db")
+                            cursor = conn.cursor()
+                            # Atualiza todos os registros onde o cliente original aparecia
+                            cursor.execute("""
+                                UPDATE orcamentos 
+                                SET cliente = ?, documento = ?, telefone = ?, endereco = ? 
+                                WHERE cliente = ?
+                            """, (novo_nome, novo_doc, novo_tel, novo_end, c_nome))
+                            conn.commit()
+                            conn.close()
+                            st.success("Dados do cliente atualizados com sucesso em todos os orçamentos!")
+                            st.rerun()
