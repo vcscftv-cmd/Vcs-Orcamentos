@@ -56,6 +56,17 @@ def iniciar_banco():
     )
     """)
     
+    # Tabela dedicada para gerenciar e salvar clientes fixos
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT UNIQUE NOT NULL,
+        documento TEXT,
+        telefone TEXT,
+        endereco TEXT
+    )
+    """)
+    
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS orcamentos (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -234,15 +245,15 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    cursor.execute("SELECT cliente, documento, telefone, endereco FROM orcamentos ORDER BY id DESC")
-    clientes_salvos = cursor.fetchall()
+    # Busca clientes da tabela dedicada de clientes
+    cursor.execute("SELECT nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
+    clientes_cadastrados = cursor.fetchall()
     conn.close()
 
     dict_clientes = {}
-    for c in clientes_salvos:
+    for c in clientes_cadastrados:
         nome_cli = c[0].strip()
-        if nome_cli not in dict_clientes:
-            dict_clientes[nome_cli] = {"documento": c[1], "telefone": c[2], "endereco": c[3]}
+        dict_clientes[nome_cli] = {"documento": c[1], "telefone": c[2], "endereco": c[3]}
 
     lista_nomes_clientes = [""] + list(dict_clientes.keys())
 
@@ -273,9 +284,9 @@ if menu == "Criar Orçamento":
         col_cad1, col_cad2 = st.columns(2)
         with col_cad1:
             cliente = st.text_input("Nome do Cliente", value=st.session_state.form_cliente)
-            documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 123.456.789-10", key="input_doc")
+            documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 123.456.789-10")
         with col_cad2:
-            telefone = st.text_input("Telefone / Celular", value=st.session_state.form_telefone, placeholder="Ex: 71 9 9999-9999", key="input_tel")
+            telefone = st.text_input("Telefone / Celular", value=st.session_state.form_telefone, placeholder="Ex: 71 9 9999-9999")
             cep_input = st.text_input("CEP (Busca automática opcional)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
             
             endereco_buscado = ""
@@ -289,56 +300,30 @@ if menu == "Criar Orçamento":
         btn_atualizar_dados = st.form_submit_button("Atualizar / Fixar Dados do Cliente")
         
         if btn_atualizar_dados:
-            if cliente:
-                st.session_state.form_cliente = cliente
-                st.session_state.form_documento = documento
-                st.session_state.form_telefone = telefone
-                st.session_state.form_endereco = endereco
-                st.success("Dados do cliente fixados com sucesso!")
+            if cliente.strip():
+                st.session_state.form_cliente = cliente.strip()
+                st.session_state.form_documento = documento.strip()
+                st.session_state.form_telefone = telefone.strip()
+                st.session_state.form_endereco = endereco.strip()
+                
+                # Salva ou atualiza automaticamente na tabela de clientes
+                conn = sqlite3.connect("banco_vcs.db")
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO clientes (nome, documento, telefone, endereco)
+                    VALUES (?, ?, ?, ?)
+                    ON CONFLICT(nome) DO UPDATE SET
+                        documento = excluded.documento,
+                        telefone = excluded.telefone,
+                        endereco = excluded.endereco
+                """, (cliente.strip(), documento.strip(), telefone.strip(), endereco.strip()))
+                conn.commit()
+                conn.close()
+                
+                st.success("Dados do cliente salvos e fixados com sucesso!")
+                st.rerun()
             else:
                 st.error("Preencha o nome do cliente.")
-
-    components.html("""
-    <script>
-    const docInput = window.parent.document.querySelector('input[aria-label*="CPF ou CNPJ"]');
-    const telInput = window.parent.document.querySelector('input[aria-label*="Telefone"]');
-
-    if (docInput) {
-        docInput.addEventListener('input', function (e) {
-            let v = e.target.value.replace(/\\D/g, "");
-            if (v.length > 14) v = v.slice(0, 14);
-            if (v.length <= 11) {
-                v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
-                v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
-                v = v.replace(/(\\d{3})(\\d{1,2})$/, "$1-$2");
-            } else {
-                v = v.replace(/^(\\d{2})(\\d)/, "$1.$2");
-                v = v.replace(/^(\\d{2})\\.(\\d{3})(\\d)/, "$1.$2.$3");
-                v = v.replace(/\\.(\\d{3})(\\d)/, "$1/$2");
-                v = v.replace(/(\\d{4})(\\d{1,2})$/, "$1-$2");
-            }
-            e.target.value = v;
-            e.target.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-    }
-
-    if (telInput) {
-        telInput.addEventListener('input', function (e) {
-            let v = e.target.value.replace(/\\D/g, "");
-            if (v.length > 11) v = v.slice(0, 11);
-            if (v.length <= 10) {
-                v = v.replace(/(\\d{2})(\\d)/, "$1 $2");
-                v = v.replace(/(\\d{4})(\\d)/, "$1-$2");
-            } else {
-                v = v.replace(/(\\d{2})(\\d)/, "$1 $2 ");
-                v = v.replace(/(\\d{1})(\\d{4})(\\d)/, "$1 $2-$3");
-            }
-            e.target.value = v;
-            e.target.dispatchEvent(new Event('input', { bubbles: true }));
-        });
-    }
-    </script>
-    """, height=0)
 
     st.markdown("---")
     
@@ -773,43 +758,61 @@ elif menu == "Gerenciar Clientes":
     cursor = conn.cursor()
     
     if pesq_cliente:
-        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos WHERE cliente LIKE ? OR documento LIKE ?", (f"%{pesq_cliente}%", f"%{pesq_cliente}%"))
+        cursor.execute("SELECT id, nome, documento, telefone, endereco FROM clientes WHERE nome LIKE ? OR documento LIKE ?", (f"%{pesq_cliente}%", f"%{pesq_cliente}%"))
     else:
-        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
+        cursor.execute("SELECT id, nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
         
     clientes_encontrados = cursor.fetchall()
     conn.close()
 
     if not clientes_encontrados:
-        st.info("Nenhum cliente encontrado nos orçamentos salvos.")
+        st.info("Nenhum cliente cadastrado.")
     else:
         for cli in clientes_encontrados:
-            c_nome, c_doc, c_tel, c_end = cli
+            c_id, c_nome, c_doc, c_tel, c_end = cli
             with st.expander(f"Cliente: {c_nome} | Doc: {c_doc or 'Não informado'}"):
-                with st.form(f"form_edit_cli_{c_nome}"):
+                with st.form(f"form_edit_cli_{c_id}"):
                     novo_nome = st.text_input("Nome do Cliente", value=c_nome)
                     novo_doc = st.text_input("CPF ou CNPJ", value=c_doc or "")
                     novo_tel = st.text_input("Telefone / Celular", value=c_tel or "")
                     novo_end = st.text_input("Endereço", value=c_end or "")
                     
-                    salvar_cli = st.form_submit_button("💾 Atualizar Dados do Cliente em todos os Orçamentos")
-                    
+                    col_c1, col_c2 = st.columns(2)
+                    with col_c1:
+                        salvar_cli = st.form_submit_button("💾 Salvar Alterações")
+                    with col_c2:
+                        excluir_cli = st.form_submit_button("🗑️ Excluir Cliente")
+
                     if salvar_cli:
-                        if not novo_nome:
+                        if not novo_nome.strip():
                             st.error("O nome do cliente não pode ficar vazio.")
                         else:
                             conn = sqlite3.connect("banco_vcs.db")
                             cursor = conn.cursor()
-                            cursor.execute("""
-                                UPDATE orcamentos 
-                                SET cliente = ?, documento = ?, telefone = ?, endereco = ? 
-                                WHERE cliente = ?
-                            """, (novo_nome, novo_doc, novo_tel, novo_end, c_nome))
-                            conn.commit()
-                            conn.close()
-                            registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado para {novo_nome}")
-                            st.success("Dados do cliente atualizados com sucesso em todos os orçamentos!")
-                            st.rerun()
+                            try:
+                                cursor.execute("""
+                                    UPDATE clientes 
+                                    SET nome = ?, documento = ?, telefone = ?, endereco = ? 
+                                    WHERE id = ?
+                                """, (novo_nome.strip(), novo_doc.strip(), novo_tel.strip(), novo_end.strip(), c_id))
+                                conn.commit()
+                                conn.close()
+                                registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado para {novo_nome}")
+                                st.success("Dados do cliente atualizados com sucesso!")
+                                st.rerun()
+                            except Exception as e:
+                                conn.close()
+                                st.error(f"Erro ao atualizar (nome já existe?): {e}")
+
+                    if excluir_cli:
+                        conn = sqlite3.connect("banco_vcs.db")
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
+                        conn.commit()
+                        conn.close()
+                        registrar_log(st.session_state.usuario_atual, "EXCLUIR CLIENTE", f"Cliente {c_nome} excluído")
+                        st.success("Cliente excluído com sucesso!")
+                        st.rerun()
 
 # ---------------------------------------------------------
 # TELA 5: GERENCIAR USUÁRIOS
