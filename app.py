@@ -55,7 +55,7 @@ def iniciar_banco():
     )
     """)
     
-    # Garante a tabela de clientes com UNIQUE no nome para evitar erros de conflito
+    # Recria ou ajusta a tabela de clientes garantindo UNIQUE no nome
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -651,7 +651,7 @@ elif menu == "Consultar Orçamentos":
                 st.write(f"**Telefone:** {orc[4]}")
                 st.write(f"**Endereço:** {orc[5]}")
                 st.write(f"**Garantia:** {orc[6]} | **Validade:** {orc[7]} | **Pagamento:** {orc[8]}")
-                st.write(f"**Criado por:** {orc[11] if len(orc) > 11 and orc[11] else 'Não registrado'}")
+                st.write(f"**Criado por:** {orc[11] if len(orc) > 11 and ot_usuario := orc[11] else 'Não registrado'}")
                 
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
