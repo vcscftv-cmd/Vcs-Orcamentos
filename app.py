@@ -55,19 +55,10 @@ def iniciar_banco():
     )
     """)
     
-    # Verifica se a tabela clientes existe e se tem a restrição UNIQUE, senão recria
-    try:
-        cursor.execute("INSERT INTO clientes (nome, documento, telefone, endereco) VALUES ('TESTE_CONflICTO_CHECK', '', '', '')")
-        cursor.execute("DELETE FROM clientes WHERE nome = 'TESTE_CONflICTO_CHECK'")
-        conn.commit()
-    except sqlite3.OperationalError:
-        cursor.execute("DROP TABLE IF EXISTS clientes")
-        conn.commit()
-
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT UNIQUE NOT NULL,
+        nome TEXT NOT NULL,
         documento TEXT,
         telefone TEXT,
         endereco TEXT
@@ -333,14 +324,23 @@ if menu == "Criar Orçamento":
                 
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO clientes (nome, documento, telefone, endereco)
-                    VALUES (?, ?, ?, ?)
-                    ON CONFLICT(nome) DO UPDATE SET
-                        documento = excluded.documento,
-                        telefone = excluded.telefone,
-                        endereco = excluded.endereco
-                """, (cliente.strip(), doc_formatado, tel_formatado, endereco.strip()))
+                
+                # Verificação manual compatível com qualquer banco (evita erro de UNIQUE ausente)
+                cursor.execute("SELECT id FROM clientes WHERE nome = ?", (cliente.strip(),))
+                cliente_existe = cursor.fetchone()
+                
+                if cliente_existe:
+                    cursor.execute("""
+                        UPDATE clientes 
+                        SET documento = ?, telefone = ?, endereco = ? 
+                        WHERE nome = ?
+                    """, (doc_formatado, tel_formatado, endereco.strip(), cliente.strip()))
+                else:
+                    cursor.execute("""
+                        INSERT INTO clientes (nome, documento, telefone, endereco)
+                        VALUES (?, ?, ?, ?)
+                    """, (cliente.strip(), doc_formatado, tel_formatado, endereco.strip()))
+                
                 conn.commit()
                 conn.close()
                 
@@ -830,7 +830,7 @@ elif menu == "Gerenciar Clientes":
                                 st.rerun()
                             except Exception as e:
                                 conn.close()
-                                st.error(f"Erro ao atualizar (nome já existe?): {e}")
+                                st.error(f"Erro ao atualizar: {e}")
 
                     if excluir_cli:
                         conn = sqlite3.connect("banco_vcs.db")
