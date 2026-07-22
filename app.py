@@ -287,6 +287,16 @@ if menu == "Criar Orçamento":
             endereco = st.text_input("Endereço Completo", value=endereco_buscado if endereco_buscado else st.session_state.form_endereco)
         
         btn_atualizar_dados = st.form_submit_button("Atualizar / Fixar Dados do Cliente")
+        
+        if btn_atualizar_dados:
+            if cliente:
+                st.session_state.form_cliente = cliente
+                st.session_state.form_documento = documento
+                st.session_state.form_telefone = telefone
+                st.session_state.form_endereco = endereco
+                st.success("Dados do cliente fixados com sucesso!")
+            else:
+                st.error("Preencha o nome do cliente.")
 
     st.markdown("---")
     
