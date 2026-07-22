@@ -75,7 +75,7 @@ def formatar_telefone(tel):
 
 # MENU LATERAL
 st.sidebar.title("🛠️ VCS Informática")
-menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos"])
+menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Pesquisar Clientes", "Gerenciar Produtos"])
 
 # ---------------------------------------------------------
 # TELA 1: CRIAR ORÇAMENTO
@@ -164,7 +164,7 @@ if menu == "Criar Orçamento":
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validades, pagamento, data, total)
+                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (num_orc, cliente, doc_fmt, tel_fmt, endereco, garantia, validade, pagamento, data_atual, total_geral))
                 
@@ -180,7 +180,7 @@ if menu == "Criar Orçamento":
                 st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
 
 # ---------------------------------------------------------
-# TELA 2: CONSULTAR ORÇAMENTOS (COM BARRA DE PESQUISA)
+# TELA 2: CONSULTAR ORÇAMENTOS
 # ---------------------------------------------------------
 elif menu == "Consultar Orçamentos":
     st.subheader("🔍 Consultar e Pesquisar Orçamentos")
@@ -219,7 +219,49 @@ elif menu == "Consultar Orçamentos":
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: R$ {item[2]:.2f} | Subtotal: R$ {item[3]:.2f}")
 
 # ---------------------------------------------------------
-# TELA 3: GERENCIAR PRODUTOS
+# TELA 3: PESQUISAR CLIENTES
+# ---------------------------------------------------------
+elif menu == "Pesquisar Clientes":
+    st.subheader("👥 Consulta e Histórico de Clientes")
+    
+    pesquisa_cliente = st.text_input("Digite o nome ou CPF/CNPJ do cliente para buscar:")
+
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    
+    if pesquisa_cliente:
+        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos WHERE cliente LIKE ? OR documento LIKE ?", (f"%{pesquisa_cliente}%", f"%{pesquisa_cliente}%"))
+    else:
+        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
+        
+    clientes = cursor.fetchall()
+    conn.close()
+
+    if not clientes:
+        st.info("Nenhum cliente cadastrado via orçamentos ainda.")
+    else:
+        for cli in clientes:
+            with st.expander(f"👤 {cli[0]} — CPF/CNPJ: {cli[1] or 'Não informado'}"):
+                st.write(f"**Telefone / Celular:** {cli[2] or 'Não informado'}")
+                st.write(f"**Endereço:** {cli[3] or 'Não informado'}")
+                
+                # Buscar histórico de orçamentos deste cliente específico
+                conn = sqlite3.connect("banco_vcs.db")
+                cursor = conn.cursor()
+                cursor.execute("SELECT numero_orcamento, data, total FROM orcamentos WHERE cliente = ? ORDER BY id DESC", (cli[0],))
+                historico = cursor.fetchall()
+                conn.close()
+                
+                st.markdown("---")
+                st.markdown("**Histórico de Orçamentos deste Cliente:**")
+                if historico:
+                    for h in historico:
+                        st.text(f"• Orçamento #{h[0]} | Data: {h[1]} | Total: R$ {h[2]:.2f}")
+                else:
+                    st.text("Nenhum orçamento registrado.")
+
+# ---------------------------------------------------------
+# TELA 4: GERENCIAR PRODUTOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
