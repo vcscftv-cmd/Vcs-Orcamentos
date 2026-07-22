@@ -56,9 +56,20 @@ def iniciar_banco():
 
 iniciar_banco()
 
+# Função para gerar número sequencial simples (ex: Orcamento_001-27-02-2026)
+def gerar_numero_orcamento():
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM orcamentos")
+    qtd = cursor.fetchone()[0]
+    conn.close()
+    
+    proximo_id = qtd + 1
+    data_hoje = datetime.datetime.now().strftime("%d-%m-%Y")
+    return f"Orcamento_{proximo_id:03d}-{data_hoje}"
+
 # Funções de Conversão e Formatação Brasileira
 def converter_para_float(texto_valor):
-    """Converte string digitada (ex: '1.000,00' ou '1000' ou '1000,50') para float"""
     try:
         limpo = str(texto_valor).strip().replace("R$", "").strip()
         if not limpo:
@@ -69,7 +80,6 @@ def converter_para_float(texto_valor):
         return 0.0
 
 def formatar_moeda(valor):
-    """Converte um número float para o padrão R$ 1.000,00"""
     try:
         val_str = f"{float(valor):,.2f}"
         val_str = val_str.replace(",", "X").replace(".", ",").replace("X", ".")
@@ -79,17 +89,17 @@ def formatar_moeda(valor):
 
 def formatar_documento(doc):
     doc_limpo = "".join(filter(str.isdigit, str(doc)))
-    if len(doc_limpo) == 11:  # CPF
+    if len(doc_limpo) == 11:
         return f"{doc_limpo[:3]}.{doc_limpo[3:6]}.{doc_limpo[6:9]}-{doc_limpo[9:]}"
-    elif len(doc_limpo) == 14:  # CNPJ
+    elif len(doc_limpo) == 14:
         return f"{doc_limpo[:2]}.{doc_limpo[2:5]}.{doc_limpo[5:8]}/{doc_limpo[8:12]}-{doc_limpo[12:]}"
     return doc
 
 def formatar_telefone(tel):
     tel_limpo = "".join(filter(str.isdigit, str(tel)))
-    if len(tel_limpo) == 11:  # Celular com 9 dígitos
+    if len(tel_limpo) == 11:
         return f"({tel_limpo[:2]}) {tel_limpo[2]} {tel_limpo[3:7]}-{tel_limpo[7:]}"
-    elif len(tel_limpo) == 10:  # Telefone fixo
+    elif len(tel_limpo) == 10:
         return f"({tel_limpo[:2]}) {tel_limpo[2:6]}-{tel_limpo[6:]}"
     return tel
 
@@ -116,21 +126,36 @@ if menu == "Criar Orçamento":
     lista_nomes_clientes = [""] + list(dict_clientes.keys())
 
     st.markdown("### 👤 Dados do Cliente")
-    col_cad1, col_cad2 = st.columns(2)
-    with col_cad1:
-        cliente_selecionado = st.selectbox("Buscar Cliente Cadastrado (Opcional)", lista_nomes_clientes)
-        
-        def_doc = dict_clientes[cliente_selecionado]["documento"] if cliente_selecionado in dict_clientes else ""
-        def_tel = dict_clientes[cliente_selecionado]["telefone"] if cliente_selecionado in dict_clientes else ""
-        def_end = dict_clientes[cliente_selecionado]["endereco"] if cliente_selecionado in dict_clientes else ""
+    
+    if "form_cliente" not in st.session_state:
+        st.session_state.form_cliente = ""
+    if "form_documento" not in st.session_state:
+        st.session_state.form_documento = ""
+    if "form_telefone" not in st.session_state:
+        st.session_state.form_telefone = ""
+    if "form_endereco" not in st.session_state:
+        st.session_state.form_endereco = ""
 
-        cliente = st.text_input("Nome do Cliente", value=cliente_selecionado if cliente_selecionado else "")
-        # Campo de texto livre para CPF ou CNPJ aceitando pontuações
-        documento = st.text_input("CPF ou CNPJ", value=def_doc or "", placeholder="Ex: 000.000.000-00 ou CNPJ")
-    with col_cad2:
-        # Campo de texto livre para Telefone / WhatsApp aceitando parênteses e traços
-        telefone = st.text_input("Telefone / WhatsApp", value=def_tel or "", placeholder="Ex: (71) 99999-9999")
-        endereco = st.text_input("Endereço", value=def_end or "")
+    def atualizar_campos_cliente():
+        sel = st.session_state.sel_cliente_box
+        if sel in dict_clientes:
+            st.session_state.form_cliente = sel
+            st.session_state.form_documento = dict_clientes[sel]["documento"] or ""
+            st.session_state.form_telefone = dict_clientes[sel]["telefone"] or ""
+            st.session_state.form_endereco = dict_clientes[sel]["endereco"] or ""
+
+    st.selectbox("Buscar Cliente Cadastrado (Opcional)", lista_nomes_clientes, key="sel_cliente_box", on_change=atualizar_campos_cliente)
+
+    with st.form("form_dados_cliente"):
+        col_cad1, col_cad2 = st.columns(2)
+        with col_cad1:
+            cliente = st.text_input("Nome do Cliente", value=st.session_state.form_cliente)
+            documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 000.000.000-00")
+        with col_cad2:
+            telefone = st.text_input("Telefone / WhatsApp", value=st.session_state.form_telefone, placeholder="Ex: (71) 99999-9999")
+            endereco = st.text_input("Endereço", value=st.session_state.form_endereco)
+        
+        btn_atualizar_dados = st.form_submit_button("Atualizar / Fixar Dados do Cliente")
 
     st.markdown("---")
     
@@ -191,14 +216,24 @@ if menu == "Criar Orçamento":
                 st.text("")
                 if st.button("Adicionar Item"):
                     preco_unit = opcoes_produtos[produto_selecionado]
-                    subtotal = preco_unit * quantidade
-                    st.session_state.carrinho.append({
-                        "produto": produto_selecionado,
-                        "quantidade": quantidade,
-                        "preco_unitario": preco_unit,
-                        "subtotal": subtotal
-                    })
-                    st.success("Item adicionado!")
+                    
+                    item_encontrado = False
+                    for item in st.session_state.carrinho:
+                        if item["produto"] == produto_selecionado:
+                            item["quantidade"] += quantidade
+                            item["subtotal"] = item["quantidade"] * item["preco_unitario"]
+                            item_encontrado = True
+                            break
+                    
+                    if not item_encontrado:
+                        subtotal = preco_unit * quantidade
+                        st.session_state.carrinho.append({
+                            "produto": produto_selecionado,
+                            "quantidade": quantidade,
+                            "preco_unitario": preco_unit,
+                            "subtotal": subtotal
+                        })
+                    st.success("Item adicionado / atualizado!")
 
     total_instalacao_calculado = valor_instalacao if srv_instalacao == "Sim" else 0.0
 
@@ -254,10 +289,9 @@ if menu == "Criar Orçamento":
             if not cliente:
                 st.error("Preencha o nome do cliente!")
             else:
-                num_orc = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
+                num_orc = gerar_numero_orcamento()
                 data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                 
-                # Mantém o que o usuário digitou ou formata caso sejam apenas números
                 doc_fmt = documento if any(c in documento for c in ".-/") else formatar_documento(documento)
                 tel_fmt = telefone if any(c in telefone for c in "()- ") else formatar_telefone(telefone)
 
@@ -308,7 +342,7 @@ elif menu == "Consultar Orçamentos":
         st.info("Nenhum orçamento encontrado.")
     else:
         for orc in orcamentos:
-            with st.expander(f"Orçamento #{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
+            with st.expander(f"{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
                 st.write(f"**CPF/CNPJ:** {orc[3]}")
                 st.write(f"**Telefone:** {orc[4]}")
                 st.write(f"**Endereço:** {orc[5]}")
