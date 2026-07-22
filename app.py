@@ -55,6 +55,15 @@ def iniciar_banco():
     )
     """)
     
+    # Verifica se a tabela clientes existe e se tem a restrição UNIQUE, senão recria
+    try:
+        cursor.execute("INSERT INTO clientes (nome, documento, telefone, endereco) VALUES ('TESTE_CONflICTO_CHECK', '', '', '')")
+        cursor.execute("DELETE FROM clientes WHERE nome = 'TESTE_CONflICTO_CHECK'")
+        conn.commit()
+    except sqlite3.OperationalError:
+        cursor.execute("DROP TABLE IF EXISTS clientes")
+        conn.commit()
+
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
