@@ -61,7 +61,6 @@ def formatar_moeda(valor):
     """Converte um número float para o padrão R$ 1.000,00"""
     try:
         val_str = f"{float(valor):,.2f}"
-        # Substitui o padrão US para o BR
         val_str = val_str.replace(",", "X").replace(".", ",").replace("X", ".")
         return f"R$ {val_str}"
     except:
@@ -121,20 +120,34 @@ if menu == "Criar Orçamento":
         endereco = st.text_input("Endereço", value=def_end or "")
 
     st.markdown("---")
-    st.subheader("🛠️ Serviço, Instalação e Defeito")
     
-    col_s1, col_s2, col_s3 = st.columns([1, 1, 2])
-    with col_s1:
-        srv_instalacao = st.selectbox("Instalação inclusa?", ["Não", "Sim"])
-    with col_s2:
-        valor_instalacao = st.number_input("Valor da Instalação (R$)", min_value=0.0, value=0.0, format="%.2f")
-    with col_s3:
-        desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
+    # Seção condicional: Serviço / Instalação
+    st.subheader("🛠️ Serviço e Instalação")
+    incluir_servico = st.radio("Deseja incluir Serviço / Instalação neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_servico")
+    
+    valor_instalacao = 0.0
+    desc_servico = ""
+    srv_instalacao = "Não"
 
-    col_d1, col_d2 = st.columns([1, 2])
-    with col_d1:
-        possui_defeito = st.selectbox("Possui defeito relatado?", ["Não", "Sim"])
-    with col_d2:
+    if incluir_servico == "Sim":
+        srv_instalacao = "Sim"
+        col_s1, col_s2 = st.columns([1, 2])
+        with col_s1:
+            valor_instalacao = st.number_input("Valor da Instalação (R$)", min_value=0.0, value=0.0, format="%.2f")
+        with col_s2:
+            desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
+
+    st.markdown("---")
+    
+    # Seção condicional: Defeito Relatado
+    st.subheader("⚠️ Defeito Relatado")
+    incluir_defeito = st.radio("Deseja relatar algum defeito no equipamento?", ["Não", "Sim"], horizontal=True, key="radio_defeito")
+    
+    possui_defeito = "Não"
+    desc_defeito = ""
+
+    if incluir_defeito == "Sim":
+        possui_defeito = "Sim"
         desc_defeito = st.text_input("Descrição do Defeito", placeholder="Ex: Equipamento não liga, sem imagem na câmera...")
 
     st.markdown("---")
