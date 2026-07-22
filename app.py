@@ -190,50 +190,53 @@ if menu == "Criar Orçamento":
         desc_defeito = st.text_input("Descrição do Defeito", placeholder="Ex: Equipamento não liga, sem imagem na câmera...")
 
     st.markdown("---")
+    
+    # Seção condicional: Adicionar Itens / Produtos
     st.subheader("🛍️ Itens do Orçamento")
-
-    if not produtos_db:
-        st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um orçamento.")
+    incluir_itens = st.radio("Deseja adicionar itens (produtos) neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
     if "carrinho" not in st.session_state:
         st.session_state.carrinho = []
 
-    if produtos_db:
-        cat_escolhida = st.selectbox("Selecione a Categoria / Setor", ["CFTV", "Informática"])
-        produtos_filtrados = [p for p in produtos_db if p[2].strip().lower() == cat_escolhida.lower()]
-        
-        if not produtos_filtrados:
-            st.info(f"Nenhum produto cadastrado na categoria '{cat_escolhida}' no momento.")
+    if incluir_itens == "Sim":
+        if not produtos_db:
+            st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um orçamento.")
         else:
-            opcoes_produtos = {p[0]: p[1] for p in produtos_filtrados}
-            col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
-            with col_p1:
-                produto_selecionado = st.selectbox(f"Produto de {cat_escolhida}", list(opcoes_produtos.keys()))
-            with col_p2:
-                quantidade = st.number_input("Qtd", min_value=1, value=1)
-            with col_p3:
-                st.text("")
-                st.text("")
-                if st.button("Adicionar Item"):
-                    preco_unit = opcoes_produtos[produto_selecionado]
-                    
-                    item_encontrado = False
-                    for item in st.session_state.carrinho:
-                        if item["produto"] == produto_selecionado:
-                            item["quantidade"] += quantidade
-                            item["subtotal"] = item["quantidade"] * item["preco_unitario"]
-                            item_encontrado = True
-                            break
-                    
-                    if not item_encontrado:
-                        subtotal = preco_unit * quantidade
-                        st.session_state.carrinho.append({
-                            "produto": produto_selecionado,
-                            "quantidade": quantidade,
-                            "preco_unitario": preco_unit,
-                            "subtotal": subtotal
-                        })
-                    st.success("Item adicionado / atualizado!")
+            cat_escolhida = st.selectbox("Selecione a Categoria / Setor", ["CFTV", "Informática"])
+            produtos_filtrados = [p for p in produtos_db if p[2].strip().lower() == cat_escolhida.lower()]
+            
+            if not produtos_filtrados:
+                st.info(f"Nenhum produto cadastrado na categoria '{cat_escolhida}' no momento.")
+            else:
+                opcoes_produtos = {p[0]: p[1] for p in produtos_filtrados}
+                col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
+                with col_p1:
+                    produto_selecionado = st.selectbox(f"Produto de {cat_escolhida}", list(opcoes_produtos.keys()))
+                with col_p2:
+                    quantidade = st.number_input("Qtd", min_value=1, value=1)
+                with col_p3:
+                    st.text("")
+                    st.text("")
+                    if st.button("Adicionar Item"):
+                        preco_unit = opcoes_produtos[produto_selecionado]
+                        
+                        item_encontrado = False
+                        for item in st.session_state.carrinho:
+                            if item["produto"] == produto_selecionado:
+                                item["quantidade"] += quantidade
+                                item["subtotal"] = item["quantidade"] * item["preco_unitario"]
+                                item_encontrado = True
+                                break
+                        
+                        if not item_encontrado:
+                            subtotal = preco_unit * quantidade
+                            st.session_state.carrinho.append({
+                                "produto": produto_selecionado,
+                                "quantidade": quantidade,
+                                "preco_unitario": preco_unit,
+                                "subtotal": subtotal
+                            })
+                        st.success("Item adicionado / atualizado!")
 
     total_instalacao_calculado = valor_instalacao if srv_instalacao == "Sim" else 0.0
 
