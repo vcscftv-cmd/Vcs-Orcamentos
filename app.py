@@ -56,7 +56,18 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# Funções de Formatação Brasileira
+# Funções de Conversão e Formatação Brasileira
+def converter_para_float(texto_valor):
+    """Converte string digitada (ex: '1.000,00' ou '1000' ou '1000,50') para float"""
+    try:
+        limpo = str(texto_valor).strip().replace("R$", "").strip()
+        if not limpo:
+            return 0.0
+        limpo = limpo.replace(".", "").replace(",", ".")
+        return float(limpo)
+    except:
+        return 0.0
+
 def formatar_moeda(valor):
     """Converte um número float para o padrão R$ 1.000,00"""
     try:
@@ -114,9 +125,11 @@ if menu == "Criar Orçamento":
         def_end = dict_clientes[cliente_selecionado]["endereco"] if cliente_selecionado in dict_clientes else ""
 
         cliente = st.text_input("Nome do Cliente", value=cliente_selecionado if cliente_selecionado else "")
-        documento = st.text_input("CPF ou CNPJ", value=def_doc or "")
+        # Campo de texto livre para CPF ou CNPJ aceitando pontuações
+        documento = st.text_input("CPF ou CNPJ", value=def_doc or "", placeholder="Ex: 000.000.000-00 ou CNPJ")
     with col_cad2:
-        telefone = st.text_input("Telefone / Celular", value=def_tel or "")
+        # Campo de texto livre para Telefone / WhatsApp aceitando parênteses e traços
+        telefone = st.text_input("Telefone / WhatsApp", value=def_tel or "", placeholder="Ex: (71) 99999-9999")
         endereco = st.text_input("Endereço", value=def_end or "")
 
     st.markdown("---")
@@ -133,7 +146,8 @@ if menu == "Criar Orçamento":
         srv_instalacao = "Sim"
         col_s1, col_s2 = st.columns([1, 2])
         with col_s1:
-            valor_instalacao = st.number_input("Valor da Instalação (R$)", min_value=0.0, value=0.0, format="%.2f")
+            txt_valor_inst = st.text_input("Valor da Instalação (R$)", value="0,00", placeholder="Ex: 150,00 ou 1000")
+            valor_instalacao = converter_para_float(txt_valor_inst)
         with col_s2:
             desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
 
@@ -214,7 +228,8 @@ if menu == "Criar Orçamento":
         with col_desc1:
             tipo_desconto = st.selectbox("Tipo de Desconto", ["Nenhum", "Valor (R$)", "Porcentagem (%)"])
         with col_desc2:
-            valor_desconto = st.number_input("Valor do Desconto", min_value=0.0, value=0.0, format="%.2f")
+            txt_valor_desc = st.text_input("Valor do Desconto", value="0,00")
+            valor_desconto = converter_para_float(txt_valor_desc)
 
         if tipo_desconto == "Valor (R$)":
             total_geral = max(0.0, subtotal_geral - valor_desconto)
@@ -241,8 +256,10 @@ if menu == "Criar Orçamento":
             else:
                 num_orc = datetime.datetime.now().strftime("%Y%m%d%H%M%S")
                 data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                doc_fmt = formatar_documento(documento)
-                tel_fmt = formatar_telefone(telefone)
+                
+                # Mantém o que o usuário digitou ou formata caso sejam apenas números
+                doc_fmt = documento if any(c in documento for c in ".-/") else formatar_documento(documento)
+                tel_fmt = telefone if any(c in telefone for c in "()- ") else formatar_telefone(telefone)
 
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
