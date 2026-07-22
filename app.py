@@ -112,13 +112,19 @@ if menu == "Criar Orçamento":
         endereco = st.text_input("Endereço", value=def_end or "")
 
     st.markdown("---")
-    st.subheader("🛠️ Serviço e Descrição")
+    st.subheader("🛠️ Serviço, Instalação e Defeito")
     
     col_s1, col_s2 = st.columns([1, 2])
     with col_s1:
         srv_instalacao = st.selectbox("Instalação inclusa?", ["Não", "Sim"])
     with col_s2:
         desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
+
+    col_d1, col_d2 = st.columns([1, 2])
+    with col_d1:
+        possui_defeito = st.selectbox("Possui defeito relatado?", ["Não", "Sim"])
+    with col_d2:
+        desc_defeito = st.text_input("Descrição do Defeito", placeholder="Ex: Equipamento não liga, sem imagem na câmera...")
 
     st.markdown("---")
     st.subheader("🛍️ Itens do Orçamento")
@@ -171,10 +177,10 @@ if menu == "Criar Orçamento":
         st.session_state.carrinho = novos_itens
 
         # Campo de Desconto
-        col_d1, col_d2 = st.columns([2, 2])
-        with col_d1:
+        col_desc1, col_desc2 = st.columns([2, 2])
+        with col_desc1:
             tipo_desconto = st.selectbox("Tipo de Desconto", ["Nenhum", "Valor (R$)", "Porcentagem (%)"])
-        with col_d2:
+        with col_desc2:
             valor_desconto = st.number_input("Valor do Desconto", min_value=0.0, value=0.0, format="%.2f")
 
         if tipo_desconto == "Valor (R$)":
