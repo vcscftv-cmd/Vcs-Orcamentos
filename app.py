@@ -1,11 +1,7 @@
 import streamlit as st
 import sqlite3
 import datetime
-import os
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
-from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-from reportlab.lib import colors
+import requests
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
@@ -56,7 +52,24 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# Função para gerar número sequencial simples (ex: Orcamento_001-27-02-2026)
+# Função para buscar endereço pelo CEP (ViaCEP)
+def buscar_cep(cep):
+    cep_limpo = "".join(filter(str.isdigit, str(cep)))
+    if len(cep_limpo) == 8:
+        try:
+            url = f"https://viacep.com.br/ws/{cep_limpo}/json/"
+            response = requests.get(url, timeout=3)
+            dados = response.json()
+            if not dados.get("erro"):
+                logradouro = dados.get("logradouro", "")
+                bairro = dados.get("bairro", "")
+                cidade = dados.get("localidade", "")
+                uf = dados.get("uf", "")
+                return f"{logradouro}, {bairro} - {cidade}/{uf}"
+        except:
+            pass
+    return None
+
 def gerar_numero_orcamento():
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
@@ -68,7 +81,6 @@ def gerar_numero_orcamento():
     data_hoje = datetime.datetime.now().strftime("%d-%m-%Y")
     return f"Orcamento_{proximo_id:03d}-{data_hoje}"
 
-# Funções de Conversão e Formatação Brasileira
 def converter_para_float(texto_valor):
     try:
         limpo = str(texto_valor).strip().replace("R$", "").strip()
@@ -133,6 +145,8 @@ if menu == "Criar Orçamento":
         st.session_state.form_documento = ""
     if "form_telefone" not in st.session_state:
         st.session_state.form_telefone = ""
+    if "form_cep" not in st.session_state:
+        st.session_state.form_cep = ""
     if "form_endereco" not in st.session_state:
         st.session_state.form_endereco = ""
 
@@ -153,13 +167,23 @@ if menu == "Criar Orçamento":
             documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 000.000.000-00")
         with col_cad2:
             telefone = st.text_input("Telefone / WhatsApp", value=st.session_state.form_telefone, placeholder="Ex: (71) 99999-9999")
-            endereco = st.text_input("Endereço", value=st.session_state.form_endereco)
+            
+            # Campo de CEP e Consulta Automática
+            cep_input = st.text_input("CEP (Busca automática em Salvador)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
+            
+            # Se o usuário preencheu o CEP, tenta buscar o endereço
+            endereco_buscado = ""
+            if cep_input:
+                resultado_cep = buscar_cep(cep_input)
+                if resultado_cep:
+                    endereco_buscado = resultado_cep
+
+            endereco = st.text_input("Endereço Completo", value=endereco_buscado if endereco_buscado else st.session_state.form_endereco)
         
         btn_atualizar_dados = st.form_submit_button("Atualizar / Fixar Dados do Cliente")
 
     st.markdown("---")
     
-    # Seção condicional: Serviço / Instalação
     st.subheader("🛠️ Serviço e Instalação")
     incluir_servico = st.radio("Deseja incluir Serviço / Instalação neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_servico")
     
@@ -178,7 +202,6 @@ if menu == "Criar Orçamento":
 
     st.markdown("---")
     
-    # Seção condicional: Defeito Relatado
     st.subheader("⚠️ Defeito Relatado")
     incluir_defeito = st.radio("Deseja relatar algum defeito no equipamento?", ["Não", "Sim"], horizontal=True, key="radio_defeito")
     
@@ -191,7 +214,6 @@ if menu == "Criar Orçamento":
 
     st.markdown("---")
     
-    # Seção condicional: Adicionar Itens / Produtos
     st.subheader("🛍️ Itens do Orçamento")
     incluir_itens = st.radio("Deseja adicionar itens (produtos) neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
@@ -323,7 +345,7 @@ if menu == "Criar Orçamento":
                 st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
 
 # ---------------------------------------------------------
-# TELA 2: CONSULTAR ORÇAMENTOS (COM OPÇÃO DE EXCLUIR)
+# TELA 2: CONSULTAR ORÇAMENTOS
 # ---------------------------------------------------------
 elif menu == "Consultar Orçamentos":
     st.subheader("🔍 Consultar e Pesquisar Orçamentos")
@@ -373,7 +395,7 @@ elif menu == "Consultar Orçamentos":
                     st.rerun()
 
 # ---------------------------------------------------------
-# TELA 3: GERENCIAR PRODUTOS (COM EDIÇÃO E EXCLUSÃO)
+# TELA 3: GERENCIAR PRODUTOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
@@ -418,10 +440,7 @@ elif menu == "Gerenciar Produtos":
             with st.expander(f"[{p_cod}] {p_desc} - {formatar_moeda(p_preco)} ({p_cat})"):
                 with st.form(f"form_edit_prod_{p_id}"):
                     novo_desc = st.text_input("Editar Descrição", value=p_desc, key=f"desc_{p_id}")
-                    
-                    # Campo de texto flexível para preço formatado
                     txt_novo_preco = st.text_input("Editar Preço (R$)", value=str(p_preco).replace('.', ','), key=f"preco_{p_id}")
-                    
                     nova_cat = st.selectbox("Editar Categoria", ["CFTV", "Informática"], index=0 if p_cat == "CFTV" else 1, key=f"cat_{p_id}")
                     
                     col_b1, col_b2 = st.columns(2)
@@ -453,7 +472,7 @@ elif menu == "Gerenciar Produtos":
                         st.rerun()
 
 # ---------------------------------------------------------
-# TELA 4: GERENCIAR / PESQUISAR CLIENTES (COM EDIÇÃO)
+# TELA 4: GERENCIAR / PESQUISAR CLIENTES
 # ---------------------------------------------------------
 elif menu == "Gerenciar Clientes":
     st.subheader("👥 Pesquisa e Gerenciamento de Clientes")
@@ -491,7 +510,6 @@ elif menu == "Gerenciar Clientes":
                         else:
                             conn = sqlite3.connect("banco_vcs.db")
                             cursor = conn.cursor()
-                            # Atualiza todos os registros onde o cliente original aparecia
                             cursor.execute("""
                                 UPDATE orcamentos 
                                 SET cliente = ?, documento = ?, telefone = ?, endereco = ? 
