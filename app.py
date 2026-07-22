@@ -76,7 +76,7 @@ def iniciar_banco():
     
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
-        senha_padrao = hash_senha("admin123")
+        senha_padrao = hash_senha("samu@2707")
         cursor.execute("INSERT INTO usuarios (usuario, senha, perfil) VALUES (?, ?, ?)", ("admin", senha_padrao, "Admin"))
         conn.commit()
         
@@ -202,7 +202,7 @@ if not st.session_state.autenticado:
                 st.success("Login realizado com sucesso!")
                 st.rerun()
             else:
-                st.error("Usuário ou senha incorretos! (Padrão inicial: usuário 'admin', senha 'admin123')")
+                st.error("Usuário ou senha incorretos!")
     
     st.stop()
 
@@ -234,12 +234,10 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    # Busca clientes garantindo que traga os mais recentes de forma única pelo nome
     cursor.execute("SELECT cliente, documento, telefone, endereco FROM orcamentos ORDER BY id DESC")
     clientes_salvos = cursor.fetchall()
     conn.close()
 
-    # Dicionário para evitar duplicatas, mantendo sempre o registro mais recente do cliente
     dict_clientes = {}
     for c in clientes_salvos:
         nome_cli = c[0].strip()
