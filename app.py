@@ -74,6 +74,13 @@ def iniciar_banco():
     )
     """)
     
+    # Migração automática caso a coluna criado_por não exista em bancos antigos
+    try:
+        cursor.execute("ALTER TABLE orcamentos ADD COLUMN criado_por TEXT")
+        conn.commit()
+    except:
+        pass
+
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         senha_padrao = hash_senha("samu@2707")
@@ -165,6 +172,8 @@ if "perfil_atual" not in st.session_state:
     st.session_state.perfil_atual = ""
 if "ultimo_acesso" not in st.session_state:
     st.session_state.ultimo_acesso = time.time()
+if "ultimo_orcamento_imprimir" not in st.session_state:
+    st.session_state.ultimo_orcamento_imprimir = None
 
 if st.session_state.autenticado:
     tempo_atual = time.time()
@@ -459,8 +468,102 @@ if menu == "Criar Orçamento":
                 conn.close()
                 
                 registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para o cliente {cliente}")
-                st.session_state.carrinho = []
-                st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
+                st.session_state.ultimo_orcamento_imprimir = num_orc
+                st.success(f"Orçamento nº {num_orc} salvo com sucesso no banco de dados!")
+                st.rerun()
+
+    # Se houver um orçamento recém-criado, exibe botão para abrir visualização de impressão/PDF
+    if st.session_state.ultimo_orcamento_imprimir:
+        st.markdown("---")
+        st.success(f"🖨️ O último orçamento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto para impressão ou salvamento em PDF!")
+        if st.button("📄 Abrir Página de Impressão / PDF do Orçamento Recente"):
+            st.session_state.modo_impressao = st.session_state.ultimo_orcamento_imprimir
+            st.rerun()
+
+# ---------------------------------------------------------
+# TELA DE IMPRESSÃO / PDF (Modo dedicado)
+# ---------------------------------------------------------
+if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
+    num_alvo = st.session_state.modo_impressao
+    
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM orcamentos WHERE numero_orcamento = ?", (num_alvo,))
+    orc_dados = cursor.fetchone()
+    
+    cursor.execute("SELECT produto, quantidade, preco_unitario, subtotal FROM itens_orcamento WHERE numero_orcamento = ?", (num_alvo,))
+    itens_dados = cursor.fetchall()
+    conn.close()
+
+    if orc_dados:
+        st.markdown("---")
+        col_voltar, col_info = st.columns([1, 4])
+        with col_voltar:
+            if st.button("⬅️ Voltar ao Sistema"):
+                st.session_state.modo_impressao = None
+                st.rerun()
+        with col_info:
+            st.info("💡 Dica: Para salvar em PDF ou Imprimir, clique no botão abaixo ou aperte **Ctrl + P** no seu teclado.")
+
+        # HTML formatado estilo folha de orçamento profissional para impressão
+        html_orcamento = f"""
+        <div style="background-color: white; color: black; padding: 30px; font-family: Arial, sans-serif; border: 1px solid #ccc; border-radius: 8px; max-width: 800px; margin: auto;">
+            <div style="text-align: center; border-bottom: 2px solid #333; padding-bottom: 15px; margin-bottom: 20px;">
+                <h1 style="margin: 0; color: #004080;">VCS Informática</h1>
+                <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Manutenção, Redes, CFTV e Suprimentos</p>
+                <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
+                <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
+            </div>
+            
+            <div style="margin-bottom: 20px; font-size: 14px;">
+                <p style="margin: 4px 0;"><strong>Data:</strong> {orc_dados[9]}</p>
+                <p style="margin: 4px 0;"><strong>Cliente:</strong> {orc_dados[2]}</p>
+                <p style="margin: 4px 0;"><strong>CPF/CNPJ:</strong> {orc_dados[3] or 'Não informado'}</p>
+                <p style="margin: 4px 0;"><strong>Telefone:</strong> {orc_dados[4] or 'Não informado'}</p>
+                <p style="margin: 4px 0;"><strong>Endereço:</strong> {orc_dados[5] or 'Não informado'}</p>
+            </div>
+
+            <table style="width: 100%; border-collapse: collapse; margin-bottom: 20px; font-size: 14px;">
+                <thead>
+                    <tr style="background-color: #f2f2f2; border-bottom: 2px solid #ddd;">
+                        <th style="padding: 8px; text-align: left;">Descrição do Item / Produto</th>
+                        <th style="padding: 8px; text-align: center;">Qtd</th>
+                        <th style="padding: 8px; text-align: right;">Preço Unit.</th>
+                        <th style="padding: 8px; text-align: right;">Subtotal</th>
+                    </tr>
+                </thead>
+                <tbody>
+        """
+        
+        for item in itens_dados:
+            html_orcamento += f"""
+                    <tr style="border-bottom: 1px solid #eee;">
+                        <td style="padding: 8px;">{item[0]}</td>
+                        <td style="padding: 8px; text-align: center;">{item[1]}</td>
+                        <td style="padding: 8px; text-align: right;">{formatar_moeda(item[2])}</td>
+                        <td style="padding: 8px; text-align: right;">{formatar_moeda(item[3])}</td>
+                    </tr>
+            """
+
+        html_orcamento += f"""
+                </tbody>
+            </table>
+
+            <div style="text-align: right; font-size: 16px; margin-bottom: 25px;">
+                <p style="margin: 5px 0;"><strong>Garantia:</strong> {orc_dados[6]}</p>
+                <p style="margin: 5px 0;"><strong>Validade da Proposta:</strong> {orc_dados[7]}</p>
+                <p style="margin: 5px 0;"><strong>Forma de Pagamento:</strong> {orc_dados[8]}</p>
+                <h2 style="color: #004080; margin-top: 15px;">Total Geral: {formatar_moeda(orc_dados[10])}</h2>
+            </div>
+
+            <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
+                <p>Obrigado pela preferência! Este orçamento foi emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else 'VCS Informática'}.</p>
+            </div>
+        </div>
+        """
+        
+        st.markdown(html_orcamento, unsafe_allow_html=True)
+        st.stop()
 
 # ---------------------------------------------------------
 # TELA 2: CONSULTAR ORÇAMENTOS
@@ -502,18 +605,24 @@ elif menu == "Consultar Orçamentos":
                 for item in itens:
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
-                if st.session_state.perfil_atual == "Admin":
-                    st.markdown("---")
-                    if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
-                        conn = sqlite3.connect("banco_vcs.db")
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
-                        cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
-                        conn.commit()
-                        conn.close()
-                        registrar_log(st.session_state.usuario_atual, "EXCLUIR ORÇAMENTO", f"Orçamento {orc[1]} excluído")
-                        st.success(f"Orçamento {orc[1]} excluído com sucesso!")
+                col_b_imp, col_b_exc = st.columns([1, 4])
+                with col_b_imp:
+                    if st.button(f"🖨️ Imprimir / PDF {orc[1]}", key=f"imp_orc_{orc[0]}"):
+                        st.session_state.modo_impressao = orc[1]
                         st.rerun()
+
+                if st.session_state.perfil_atual == "Admin":
+                    with col_b_exc:
+                        if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
+                            conn = sqlite3.connect("banco_vcs.db")
+                            cursor = conn.cursor()
+                            cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
+                            cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
+                            conn.commit()
+                            conn.close()
+                            registrar_log(st.session_state.usuario_atual, "EXCLUIR ORÇAMENTO", f"Orçamento {orc[1]} excluído")
+                            st.success(f"Orçamento {orc[1]} excluído com sucesso!")
+                            st.rerun()
 
 # ---------------------------------------------------------
 # TELA 3: GERENCIAR PRODUTOS
