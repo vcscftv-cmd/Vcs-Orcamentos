@@ -56,7 +56,6 @@ def iniciar_banco():
     )
     """)
     
-    # Tabela dedicada para gerenciar e salvar clientes fixos
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -245,7 +244,6 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    # Busca clientes da tabela dedicada de clientes
     cursor.execute("SELECT nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
     clientes_cadastrados = cursor.fetchall()
     conn.close()
@@ -286,7 +284,7 @@ if menu == "Criar Orçamento":
             cliente = st.text_input("Nome do Cliente", value=st.session_state.form_cliente)
             documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 123.456.789-10")
         with col_cad2:
-            telefone = st.text_input("Telefone / Celular", value=st.session_state.form_telefone, placeholder="Ex: 71 9 9999-9999")
+            telefone = st.text_input("Telefone / Celular", value=st.session_state.form_telefone, placeholder="Ex: 71 9 9999 9999")
             cep_input = st.text_input("CEP (Busca automática opcional)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
             
             endereco_buscado = ""
@@ -306,7 +304,6 @@ if menu == "Criar Orçamento":
                 st.session_state.form_telefone = telefone.strip()
                 st.session_state.form_endereco = endereco.strip()
                 
-                # Salva ou atualiza automaticamente na tabela de clientes
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
                 cursor.execute("""
@@ -324,6 +321,55 @@ if menu == "Criar Orçamento":
                 st.rerun()
             else:
                 st.error("Preencha o nome do cliente.")
+
+    # Script JavaScript otimizado para aplicar máscaras fluidas em tempo real sem apagar o texto
+    components.html("""
+    <script>
+    const inputs = window.parent.document.querySelectorAll('input');
+    inputs.forEach(input => {
+        const label = input.getAttribute('aria-label');
+        if (label && label.includes('CPF ou CNPJ')) {
+            if (!input.dataset.masked) {
+                input.dataset.masked = 'true';
+                input.addEventListener('input', function (e) {
+                    let v = e.target.value.replace(/\\D/g, "");
+                    if (v.length > 14) v = v.slice(0, 14);
+                    if (v.length <= 11) {
+                        v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
+                        v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
+                        v = v.replace(/(\\d{3})(\\d{1,2})$/, "$1-$2");
+                    } else {
+                        v = v.replace(/^(\\d{2})(\\d)/, "$1.$2");
+                        v = v.replace(/^(\\d{2})\\.(\\d{3})(\\d)/, "$1.$2.$3");
+                        v = v.replace(/\\.(\\d{3})(\\d)/, "$1/$2");
+                        v = v.replace(/(\\d{4})(\\d{1,2})$/, "$1-$2");
+                    }
+                    e.target.value = v;
+                    e.target.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            }
+        }
+        if (label && label.includes('Telefone / Celular')) {
+            if (!input.dataset.masked) {
+                input.dataset.masked = 'true';
+                input.addEventListener('input', function (e) {
+                    let v = e.target.value.replace(/\\D/g, "");
+                    if (v.length > 11) v = v.slice(0, 11);
+                    if (v.length <= 10) {
+                        v = v.replace(/(\\d{2})(\\d)/, "$1 $2");
+                        v = v.replace(/(\\d{4})(\\d)/, "$1-$2");
+                    } else {
+                        v = v.replace(/(\\d{2})(\\d)/, "$1 $2 ");
+                        v = v.replace(/(\\d{1})(\\d{4})(\\d)/, "$1 $2-$3");
+                    }
+                    e.target.value = v;
+                    e.target.dispatchEvent(new Event('input', { bubbles: true }));
+                });
+            }
+        }
+    });
+    </script>
+    """, height=0)
 
     st.markdown("---")
     
