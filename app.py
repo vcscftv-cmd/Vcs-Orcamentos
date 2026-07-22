@@ -166,7 +166,6 @@ if "perfil_atual" not in st.session_state:
 if "ultimo_acesso" not in st.session_state:
     st.session_state.ultimo_acesso = time.time()
 
-# Verificar inatividade se o usuário estiver logado
 if st.session_state.autenticado:
     tempo_atual = time.time()
     inatividade = tempo_atual - st.session_state.ultimo_acesso
@@ -178,10 +177,8 @@ if st.session_state.autenticado:
         st.warning("⚠️ Sessão expirada por inatividade (mais de 10 minutos sem uso). Faça login novamente.")
         st.rerun()
     else:
-        # Atualiza o cronômetro a cada interação
         st.session_state.ultimo_acesso = time.time()
 
-# TELA DE LOGIN SE NÃO ESTIVER AUTENTICADO
 if not st.session_state.autenticado:
     st.title("🔐 VCS Informática - Login")
     with st.form("form_login"):
@@ -209,7 +206,6 @@ if not st.session_state.autenticado:
     
     st.stop()
 
-# MENU LATERAL (Já logado)
 st.sidebar.title(f"🛠️ VCS Informática")
 st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual})")
 
@@ -238,11 +234,18 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
+    # Busca clientes garantindo que traga os mais recentes de forma única pelo nome
+    cursor.execute("SELECT cliente, documento, telefone, endereco FROM orcamentos ORDER BY id DESC")
     clientes_salvos = cursor.fetchall()
     conn.close()
 
-    dict_clientes = {c[0]: {"documento": c[1], "telefone": c[2], "endereco": c[3]} for c in clientes_salvos}
+    # Dicionário para evitar duplicatas, mantendo sempre o registro mais recente do cliente
+    dict_clientes = {}
+    for c in clientes_salvos:
+        nome_cli = c[0].strip()
+        if nome_cli not in dict_clientes:
+            dict_clientes[nome_cli] = {"documento": c[1], "telefone": c[2], "endereco": c[3]}
+
     lista_nomes_clientes = [""] + list(dict_clientes.keys())
 
     st.markdown("### 👤 Dados do Cliente")
