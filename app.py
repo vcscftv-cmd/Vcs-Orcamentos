@@ -26,7 +26,7 @@ def iniciar_banco():
     )
     """)
     
-    # Tabela de Logs de Auditoria (quem alterou/criou e quando)
+    # Tabela de Logs de Auditoria
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -191,7 +191,7 @@ if not st.session_state.autenticado:
             else:
                 st.error("Usuário ou senha incorretos! (Padrão inicial: usuário 'admin', senha 'admin123')")
     
-    st.stop() # Interrompe a execução do restante se não estiver logado
+    st.stop()
 
 # MENU LATERAL (Já logado)
 st.sidebar.title(f"🛠️ VCS Informática")
@@ -199,7 +199,6 @@ st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.s
 
 opcoes_menu = ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"]
 
-# Se for Admin, adiciona opções extras no menu
 if st.session_state.perfil_atual == "Admin":
     opcoes_menu.extend(["Gerenciar Usuários", "Logs de Auditoria"])
 
@@ -476,7 +475,6 @@ elif menu == "Consultar Orçamentos":
                 for item in itens:
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
-                # Apenas Admin pode excluir orçamentos
                 if st.session_state.perfil_atual == "Admin":
                     st.markdown("---")
                     if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
@@ -496,7 +494,6 @@ elif menu == "Consultar Orçamentos":
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
     
-    # Apenas Admin pode cadastrar novos produtos
     if st.session_state.perfil_atual == "Admin":
         with st.form("cad_prod"):
             st.markdown("### Cadastrar Novo Produto")
@@ -622,7 +619,7 @@ elif menu == "Gerenciar Clientes":
                             st.rerun()
 
 # ---------------------------------------------------------
-# TELA 5: GERENCIAR USUÁRIOS (APENAS ADMIN)
+# TELA 5: GERENCIAR USUÁRIOS (APENAS ADMIN COM EDIÇÃO)
 # ---------------------------------------------------------
 elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
     st.subheader("👤 Gerenciamento de Usuários do Sistema")
@@ -651,7 +648,8 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
                 st.error("Preencha o usuário e a senha.")
 
     st.markdown("---")
-    st.subheader("Usuários Cadastrados")
+    st.subheader("Lista e Edição de Usuários Cadastrados")
+    
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, usuario, perfil FROM usuarios")
@@ -659,19 +657,50 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
     conn.close()
 
     for u in usuarios_cad:
-        col_u1, col_u2, col_u3 = st.columns([2, 2, 1])
-        col_u1.write(f"**Usuário:** {u[1]}")
-        col_u2.write(f"**Perfil:** {u[2]}")
-        if u[1] != "admin": # Evita excluir o admin principal
-            if col_u3.button("🗑️ Excluir", key=f"del_user_{u[0]}"):
-                conn = sqlite3.connect("banco_vcs.db")
-                cursor = conn.cursor()
-                cursor.execute("DELETE FROM usuarios WHERE id = ?", (u[0],))
-                conn.commit()
-                conn.close()
-                registrar_log(st.session_state.usuario_atual, "EXCLUIR USUÁRIO", f"Usuário {u[1]} excluído")
-                st.success(f"Usuário {u[1]} excluído!")
-                st.rerun()
+        u_id, u_nome, u_perfil = u
+        with st.expander(f"Usuário: {u_nome} ({u_perfil})"):
+            with st.form(f"form_edit_user_{u_id}"):
+                edit_nome = st.text_input("Nome de Usuário", value=u_nome, key=f"unome_{u_id}")
+                edit_senha = st.text_input("Nova Senha (deixe em branco para não alterar)", type="password", key=f"usenha_{u_id}")
+                edit_perfil = st.selectbox("Perfil de Acesso", ["Funcionário", "Admin"], index=0 if u_perfil == "Funcionário" else 1, key=f"uperfil_{u_id}")
+                
+                col_u1, col_u2 = st.columns(2)
+                with col_u1:
+                    salvar_user = st.form_submit_button("💾 Salvar Alterações")
+                with col_u2:
+                    excluir_user = st.form_submit_button("🗑️ Excluir Usuário") if u_nome != "admin" else False
+
+                if salvar_user:
+                    if not edit_nome:
+                        st.error("O nome de usuário não pode ficar vazio.")
+                    else:
+                        conn = sqlite3.connect("banco_vcs.db")
+                        cursor = conn.cursor()
+                        try:
+                            if edit_senha.strip():
+                                senha_cripto = hash_senha(edit_senha)
+                                cursor.execute("UPDATE usuarios SET usuario = ?, senha = ?, perfil = ? WHERE id = ?", (edit_nome, senha_cripto, edit_perfil, u_id))
+                            else:
+                                cursor.execute("UPDATE usuarios SET usuario = ?, perfil = ? WHERE id = ?", (edit_nome, edit_perfil, u_id))
+                            
+                            conn.commit()
+                            conn.close()
+                            registrar_log(st.session_state.usuario_atual, "EDITAR USUÁRIO", f"Usuário {u_nome} atualizado")
+                            st.success("Usuário atualizado com sucesso!")
+                            st.rerun()
+                        except:
+                            conn.close()
+                            st.error("Erro: Este nome de usuário já está em uso por outro cadastro.")
+
+                if excluir_user:
+                    conn = sqlite3.connect("banco_vcs.db")
+                    cursor = conn.cursor()
+                    cursor.execute("DELETE FROM usuarios WHERE id = ?", (u_id,))
+                    conn.commit()
+                    conn.close()
+                    registrar_log(st.session_state.usuario_atual, "EXCLUIR USUÁRIO", f"Usuário {u_nome} excluído")
+                    st.success(f"Usuário {u_nome} excluído!")
+                    st.rerun()
 
 # ---------------------------------------------------------
 # TELA 6: LOGS DE AUDITORIA (APENAS ADMIN)
