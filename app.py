@@ -5,9 +5,21 @@ import datetime
 import requests
 import hashlib
 import time
+import base64
+import os
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
+
+# ⚙️ CONFIGURAÇÃO DA LOGOMARCA
+# Coloque o nome do arquivo da sua logo na mesma pasta do app.py (ex: "logo.png" ou "logo.jpg")
+ARQUIVO_LOGO = "logo.png" 
+
+def obter_logo_base64():
+    if os.path.exists(ARQUIVO_LOGO):
+        with open(ARQUIVO_LOGO, "rb") as img_file:
+            return base64.b64encode(img_file.read()).decode()
+    return None
 
 # Função para criptografar senhas por segurança
 def hash_senha(senha):
@@ -145,22 +157,6 @@ def formatar_moeda(valor):
     except:
         return "R$ 0,00"
 
-def formatar_documento(doc):
-    doc_limpo = "".join(filter(str.isdigit, str(doc)))
-    if len(doc_limpo) == 11:
-        return f"{doc_limpo[:3]}.{doc_limpo[3:6]}.{doc_limpo[6:9]}-{doc_limpo[9:]}"
-    elif len(doc_limpo) == 14:
-        return f"{doc_limpo[:2]}.{doc_limpo[2:5]}.{doc_limpo[5:8]}/{doc_limpo[8:12]}-{doc_limpo[12:]}"
-    return doc
-
-def formatar_telefone(tel):
-    tel_limpo = "".join(filter(str.isdigit, str(tel)))
-    if len(tel_limpo) == 11:
-        return f"({tel_limpo[:2]}) {tel_limpo[2]} {tel_limpo[3:7]}-{tel_limpo[7:]}"
-    elif len(tel_limpo) == 10:
-        return f"({tel_limpo[:2]}) {tel_limpo[2:6]}-{tel_limpo[6:]}"
-    return tel
-
 # CONTROLE DE SESSÃO E INATIVIDADE (10 MINUTOS = 600 SEGUNDOS)
 TEMPO_INATIVIDADE_MAX = 600 
 
@@ -282,10 +278,10 @@ if menu == "Criar Orçamento":
         col_cad1, col_cad2 = st.columns(2)
         with col_cad1:
             cliente = st.text_input("Nome do Cliente", value=st.session_state.form_cliente)
-            documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 000.000.000-00")
+            documento = st.text_input("CPF ou CNPJ (Livre)", value=st.session_state.form_documento, placeholder="Digite como preferir")
         with col_cad2:
-            telefone = st.text_input("Telefone / WhatsApp", value=st.session_state.form_telefone, placeholder="Ex: (71) 99999-9999")
-            cep_input = st.text_input("CEP (Busca automática em Salvador)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
+            telefone = st.text_input("Telefone / WhatsApp (Livre)", value=st.session_state.form_telefone, placeholder="Digite como preferir")
+            cep_input = st.text_input("CEP (Busca automática opcional)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
             
             endereco_buscado = ""
             if cep_input:
@@ -441,16 +437,13 @@ if menu == "Criar Orçamento":
             else:
                 num_orc = gerar_numero_orcamento()
                 data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-                
-                doc_fmt = documento if any(c in documento for c in ".-/") else formatar_documento(documento)
-                tel_fmt = telefone if any(c in telefone for c in "()- ") else formatar_telefone(telefone)
 
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (num_orc, cliente, doc_fmt, tel_fmt, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual))
+                """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual))
                 
                 for item in st.session_state.carrinho:
                     cursor.execute("""
@@ -501,6 +494,9 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
             st.session_state.modo_impressao = None
             st.rerun()
 
+        logo_b64 = obter_logo_base64()
+        tag_logo = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 80px; margin-bottom: 10px;" />' if logo_b64 else ''
+
         html_orcamento = f"""
         <!DOCTYPE html>
         <html>
@@ -529,6 +525,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar em PDF</button>
                 
                 <div class="header">
+                    {tag_logo}
                     <h1>VCS Informática</h1>
                     <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Manutenção, Redes, CFTV e Suprimentos</p>
                     <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
@@ -584,7 +581,6 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         </html>
         """
         
-        # Renderiza a página formatada com botão direto de impressão/PDF
         components.html(html_orcamento, height=850, scrolling=True)
         st.stop()
 
