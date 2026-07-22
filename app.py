@@ -75,57 +75,82 @@ def formatar_telefone(tel):
 
 # MENU LATERAL
 st.sidebar.title("🛠️ VCS Informática")
-menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Pesquisar Clientes", "Gerenciar Produtos"])
+menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos"])
 
 # ---------------------------------------------------------
-# TELA 1: CRIAR ORÇAMENTO
+# TELA 1: CRIAR ORÇAMENTO (COM BUSCA DE CLIENTES E CATEGORIAS)
 # ---------------------------------------------------------
 if menu == "Criar Orçamento":
     st.subheader("📝 Novo Orçamento")
     
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
-    cursor.execute("SELECT descricao, preco FROM produtos")
+    cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
+    
+    # Buscar clientes já salvos para o autocomplete
+    cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
+    clientes_salvos = cursor.fetchall()
     conn.close()
 
-    if not produtos_db:
-        st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um orçamento.")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        cliente = st.text_input("Nome do Cliente")
-        documento = st.text_input("CPF ou CNPJ")
-    with col2:
-        telefone = st.text_input("Telefone / Celular")
-        endereco = st.text_input("Endereço")
+    # Dicionário de dados dos clientes salvos
+    dict_clientes = {c[0]: {"documento": c[1], "telefone": c[2], "endereco": c[3]} for c in clientes_salvos}
+    lista_nomes_clientes = [""] + list(dict_clientes.keys())
+
+    st.markdown("### 👤 Dados do Cliente")
+    col_cad1, col_cad2 = st.columns(2)
+    with col_cad1:
+        # Selecionar cliente já existente ou digitar um novo
+        cliente_selecionado = st.selectbox("Buscar Cliente Cadastrado (Opcional)", lista_nomes_clientes)
+        
+        # Preencher automático se selecionar da lista
+        def_doc = dict_clientes[cliente_selecionado]["documento"] if cliente_selecionado in dict_clientes else ""
+        def_tel = dict_clientes[cliente_selecionado]["telefone"] if cliente_selecionado in dict_clientes else ""
+        def_end = dict_clientes[cliente_selecionado]["endereco"] if cliente_selecionado in dict_clientes else ""
+
+        cliente = st.text_input("Nome do Cliente", value=cliente_selecionado if cliente_selecionado else "")
+        documento = st.text_input("CPF ou CNPJ", value=def_doc or "")
+    with col_cad2:
+        telefone = st.text_input("Telefone / Celular", value=def_tel or "")
+        endereco = st.text_input("Endereço", value=def_end or "")
 
     st.markdown("---")
     st.subheader("🛍️ Itens do Orçamento")
+
+    if not produtos_db:
+        st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um orçamento.")
 
     if "carrinho" not in st.session_state:
         st.session_state.carrinho = []
 
     if produtos_db:
-        opcoes_produtos = {p[0]: p[1] for p in produtos_db}
-        col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
-        with col_p1:
-            produto_selecionado = st.selectbox("Selecionar Produto", list(opcoes_produtos.keys()))
-        with col_p2:
-            quantidade = st.number_input("Qtd", min_value=1, value=1)
-        with col_p3:
-            st.text("")
-            st.text("")
-            if st.button("Adicionar Item"):
-                preco_unit = opcoes_produtos[produto_selecionado]
-                subtotal = preco_unit * quantidade
-                st.session_state.carrinho.append({
-                    "produto": produto_selecionado,
-                    "quantidade": quantidade,
-                    "preco_unitario": preco_unit,
-                    "subtotal": subtotal
-                })
-                st.success("Item adicionado!")
+        # Separar produtos por categoria (CFTV e Informática)
+        cat_escolhida = st.selectbox("Selecione a Categoria / Setor", ["CFTV", "Informática"])
+        
+        produtos_filtrados = [p for p in produtos_db if p[2].strip().lower() == cat_escolhida.lower()]
+        
+        if not produtos_filtrados:
+            st.info(f"Nenhum produto cadastrado na categoria '{cat_escolhida}' no momento.")
+        else:
+            opcoes_produtos = {p[0]: p[1] for p in produtos_filtrados}
+            col_p1, col_p2, col_p3 = st.columns([3, 1, 1])
+            with col_p1:
+                produto_selecionado = st.selectbox(f"Produto de {cat_escolhida}", list(opcoes_produtos.keys()))
+            with col_p2:
+                quantidade = st.number_input("Qtd", min_value=1, value=1)
+            with col_p3:
+                st.text("")
+                st.text("")
+                if st.button("Adicionar Item"):
+                    preco_unit = opcoes_produtos[produto_selecionado]
+                    subtotal = preco_unit * quantidade
+                    st.session_state.carrinho.append({
+                        "produto": produto_selecionado,
+                        "quantidade": quantidade,
+                        "preco_unitario": preco_unit,
+                        "subtotal": subtotal
+                    })
+                    st.success("Item adicionado!")
 
     if st.session_state.carrinho:
         st.markdown("### Carrinho Atual")
@@ -219,49 +244,7 @@ elif menu == "Consultar Orçamentos":
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: R$ {item[2]:.2f} | Subtotal: R$ {item[3]:.2f}")
 
 # ---------------------------------------------------------
-# TELA 3: PESQUISAR CLIENTES
-# ---------------------------------------------------------
-elif menu == "Pesquisar Clientes":
-    st.subheader("👥 Consulta e Histórico de Clientes")
-    
-    pesquisa_cliente = st.text_input("Digite o nome ou CPF/CNPJ do cliente para buscar:")
-
-    conn = sqlite3.connect("banco_vcs.db")
-    cursor = conn.cursor()
-    
-    if pesquisa_cliente:
-        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos WHERE cliente LIKE ? OR documento LIKE ?", (f"%{pesquisa_cliente}%", f"%{pesquisa_cliente}%"))
-    else:
-        cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
-        
-    clientes = cursor.fetchall()
-    conn.close()
-
-    if not clientes:
-        st.info("Nenhum cliente cadastrado via orçamentos ainda.")
-    else:
-        for cli in clientes:
-            with st.expander(f"👤 {cli[0]} — CPF/CNPJ: {cli[1] or 'Não informado'}"):
-                st.write(f"**Telefone / Celular:** {cli[2] or 'Não informado'}")
-                st.write(f"**Endereço:** {cli[3] or 'Não informado'}")
-                
-                # Buscar histórico de orçamentos deste cliente específico
-                conn = sqlite3.connect("banco_vcs.db")
-                cursor = conn.cursor()
-                cursor.execute("SELECT numero_orcamento, data, total FROM orcamentos WHERE cliente = ? ORDER BY id DESC", (cli[0],))
-                historico = cursor.fetchall()
-                conn.close()
-                
-                st.markdown("---")
-                st.markdown("**Histórico de Orçamentos deste Cliente:**")
-                if historico:
-                    for h in historico:
-                        st.text(f"• Orçamento #{h[0]} | Data: {h[1]} | Total: R$ {h[2]:.2f}")
-                else:
-                    st.text("Nenhum orçamento registrado.")
-
-# ---------------------------------------------------------
-# TELA 4: GERENCIAR PRODUTOS
+# TELA 3: GERENCIAR PRODUTOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
@@ -270,7 +253,7 @@ elif menu == "Gerenciar Produtos":
         codigo = st.text_input("Código do Produto")
         descricao = st.text_input("Descrição do Produto")
         preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
-        categoria = st.text_input("Categoria")
+        categoria = st.selectbox("Categoria", ["CFTV", "Informática"])
         submit = st.form_submit_button("Cadastrar Produto")
         
         if submit:
