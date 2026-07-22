@@ -56,7 +56,17 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# Função para formatar CPF/CNPJ e Telefone dinamicamente
+# Funções de Formatação Brasileira
+def formatar_moeda(valor):
+    """Converte um número float para o padrão R$ 1.000,00"""
+    try:
+        val_str = f"{float(valor):,.2f}"
+        # Substitui o padrão US para o BR
+        val_str = val_str.replace(",", "X").replace(".", ",").replace("X", ".")
+        return f"R$ {val_str}"
+    except:
+        return "R$ 0,00"
+
 def formatar_documento(doc):
     doc_limpo = "".join(filter(str.isdigit, str(doc)))
     if len(doc_limpo) == 11:  # CPF
@@ -88,7 +98,6 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    # Buscar clientes já salvos para preenchimento automático
     cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
     clientes_salvos = cursor.fetchall()
     conn.close()
@@ -164,8 +173,6 @@ if menu == "Criar Orçamento":
                     })
                     st.success("Item adicionado!")
 
-    # Exibição do Carrinho e Valor de Instalação somados
-    # Vamos considerar o subtotal dos produtos + o valor da instalação (se Sim e valor > 0)
     total_instalacao_calculado = valor_instalacao if srv_instalacao == "Sim" else 0.0
 
     if st.session_state.carrinho or total_instalacao_calculado > 0:
@@ -177,7 +184,7 @@ if menu == "Criar Orçamento":
                 col_i1, col_i2, col_i3, col_i4 = st.columns([3, 1, 1, 1])
                 col_i1.write(item["produto"])
                 col_i2.write(f"Qtd: {item['quantidade']}")
-                col_i3.write(f"R$ {item['subtotal']:.2f}")
+                col_i3.write(formatar_moeda(item['subtotal']))
                 subtotal_produtos += item["subtotal"]
                 if not col_i4.button("🗑️", key=f"del_{i}"):
                     novos_itens.append(item)
@@ -186,11 +193,10 @@ if menu == "Criar Orçamento":
             subtotal_produtos = 0.0
 
         if srv_instalacao == "Sim" and valor_instalacao > 0:
-            st.markdown(f"**Taxa / Valor de Instalação:** R$ {valor_instalacao:.2f}")
+            st.markdown(f"**Taxa / Valor de Instalação:** {formatar_moeda(valor_instalacao)}")
 
         subtotal_geral = subtotal_produtos + total_instalacao_calculado
 
-        # Campo de Desconto
         col_desc1, col_desc2 = st.columns([2, 2])
         with col_desc1:
             tipo_desconto = st.selectbox("Tipo de Desconto", ["Nenhum", "Valor (R$)", "Porcentagem (%)"])
@@ -204,7 +210,7 @@ if menu == "Criar Orçamento":
         else:
             total_geral = subtotal_geral
 
-        st.markdown(f"### **Total Geral: R$ {total_geral:.2f}**")
+        st.markdown(f"### **Total Geral: {formatar_moeda(total_geral)}**")
 
         st.markdown("---")
         st.subheader("⚙️ Condições")
@@ -238,7 +244,6 @@ if menu == "Criar Orçamento":
                         VALUES (?, ?, ?, ?, ?)
                     """, (num_orc, item["produto"], item["quantidade"], item["preco_unitario"], item["subtotal"]))
                 
-                # Se houver valor de instalação, podemos salvar como um item opcional ou tratá-lo no orçamento se necessário
                 if srv_instalacao == "Sim" and valor_instalacao > 0:
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
@@ -273,7 +278,7 @@ elif menu == "Consultar Orçamentos":
         st.info("Nenhum orçamento encontrado.")
     else:
         for orc in orcamentos:
-            with st.expander(f"Orçamento #{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: R$ {orc[10]:.2f}"):
+            with st.expander(f"Orçamento #{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
                 st.write(f"**CPF/CNPJ:** {orc[3]}")
                 st.write(f"**Telefone:** {orc[4]}")
                 st.write(f"**Endereço:** {orc[5]}")
@@ -287,7 +292,7 @@ elif menu == "Consultar Orçamentos":
                 
                 st.markdown("**Itens:**")
                 for item in itens:
-                    st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: R$ {item[2]:.2f} | Subtotal: R$ {item[3]:.2f}")
+                    st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
 # ---------------------------------------------------------
 # TELA 3: GERENCIAR PRODUTOS
@@ -325,4 +330,4 @@ elif menu == "Gerenciar Produtos":
     conn.close()
     
     for p in prods:
-        st.text(f"[{p[0]}] {p[1]} - R$ {p[2]:.2f} ({p[3]})")
+        st.text(f"[{p[0]}] {p[1]} - {formatar_moeda(p[2])} ({p[3]})")
