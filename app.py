@@ -3,6 +3,7 @@ import sqlite3
 import datetime
 import requests
 import hashlib
+import time
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
@@ -16,7 +17,6 @@ def iniciar_banco():
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
     
-    # Tabela de Usuários
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS usuarios (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -26,7 +26,6 @@ def iniciar_banco():
     )
     """)
     
-    # Tabela de Logs de Auditoria
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS logs (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +74,6 @@ def iniciar_banco():
     )
     """)
     
-    # Cria um usuário Admin padrão se não existir nenhum
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         senha_padrao = hash_senha("admin123")
@@ -86,7 +84,6 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# Função para registrar ações no Log
 def registrar_log(usuario, acao, detalhes):
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
@@ -95,7 +92,6 @@ def registrar_log(usuario, acao, detalhes):
     conn.commit()
     conn.close()
 
-# Função para buscar endereço pelo CEP (ViaCEP)
 def buscar_cep(cep):
     cep_limpo = "".join(filter(str.isdigit, str(cep)))
     if len(cep_limpo) == 8:
@@ -158,13 +154,32 @@ def formatar_telefone(tel):
         return f"({tel_limpo[:2]}) {tel_limpo[2:6]}-{tel_limpo[6:]}"
     return tel
 
-# CONTROLE DE SESSÃO / LOGIN
+# CONTROLE DE SESSÃO E INATIVIDADE (10 MINUTOS = 600 SEGUNDOS)
+TEMPO_INATIVIDADE_MAX = 600 
+
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_atual" not in st.session_state:
     st.session_state.usuario_atual = ""
 if "perfil_atual" not in st.session_state:
     st.session_state.perfil_atual = ""
+if "ultimo_acesso" not in st.session_state:
+    st.session_state.ultimo_acesso = time.time()
+
+# Verificar inatividade se o usuário estiver logado
+if st.session_state.autenticado:
+    tempo_atual = time.time()
+    inatividade = tempo_atual - st.session_state.ultimo_acesso
+    if inatividade > TEMPO_INATIVIDADE_MAX:
+        registrar_log(st.session_state.usuario_atual, "LOGOUT AUTOMÁTICO", "Deslogado por inatividade (> 10 min)")
+        st.session_state.autenticado = False
+        st.session_state.usuario_atual = ""
+        st.session_state.perfil_atual = ""
+        st.warning("⚠️ Sessão expirada por inatividade (mais de 10 minutos sem uso). Faça login novamente.")
+        st.rerun()
+    else:
+        # Atualiza o cronômetro a cada interação
+        st.session_state.ultimo_acesso = time.time()
 
 # TELA DE LOGIN SE NÃO ESTIVER AUTENTICADO
 if not st.session_state.autenticado:
@@ -185,6 +200,7 @@ if not st.session_state.autenticado:
                 st.session_state.autenticado = True
                 st.session_state.usuario_atual = user_input
                 st.session_state.perfil_atual = res[0]
+                st.session_state.ultimo_acesso = time.time()
                 registrar_log(user_input, "LOGIN", "Usuário entrou no sistema")
                 st.success("Login realizado com sucesso!")
                 st.rerun()
@@ -205,7 +221,7 @@ if st.session_state.perfil_atual == "Admin":
 menu = st.sidebar.radio("Navegação", opcoes_menu)
 
 if st.sidebar.button("🚪 Sair do Sistema"):
-    registrar_log(st.session_state.usuario_atual, "LOGOUT", "Usuário saiu do sistema")
+    registrar_log(st.session_state.usuario_atual, "LOGOUT", "Usuário saiu do sistema manualmente")
     st.session_state.autenticado = False
     st.session_state.usuario_atual = ""
     st.session_state.perfil_atual = ""
@@ -619,7 +635,7 @@ elif menu == "Gerenciar Clientes":
                             st.rerun()
 
 # ---------------------------------------------------------
-# TELA 5: GERENCIAR USUÁRIOS (APENAS ADMIN COM EDIÇÃO)
+# TELA 5: GERENCIAR USUÁRIOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
     st.subheader("👤 Gerenciamento de Usuários do Sistema")
@@ -703,7 +719,7 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
                     st.rerun()
 
 # ---------------------------------------------------------
-# TELA 6: LOGS DE AUDITORIA (APENAS ADMIN)
+# TELA 6: LOGS DE AUDITORIA
 # ---------------------------------------------------------
 elif menu == "Logs de Auditoria" and st.session_state.perfil_atual == "Admin":
     st.subheader("📋 Logs de Auditoria (Histórico de Alterações)")
