@@ -78,7 +78,7 @@ st.sidebar.title("🛠️ VCS Informática")
 menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos"])
 
 # ---------------------------------------------------------
-# TELA 1: CRIAR ORÇAMENTO (COM BUSCA DE CLIENTES E CATEGORIAS)
+# TELA 1: CRIAR ORÇAMENTO
 # ---------------------------------------------------------
 if menu == "Criar Orçamento":
     st.subheader("📝 Novo Orçamento")
@@ -88,22 +88,19 @@ if menu == "Criar Orçamento":
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
     
-    # Buscar clientes já salvos para o autocomplete
+    # Buscar clientes já salvos para preenchimento automático
     cursor.execute("SELECT DISTINCT cliente, documento, telefone, endereco FROM orcamentos")
     clientes_salvos = cursor.fetchall()
     conn.close()
 
-    # Dicionário de dados dos clientes salvos
     dict_clientes = {c[0]: {"documento": c[1], "telefone": c[2], "endereco": c[3]} for c in clientes_salvos}
     lista_nomes_clientes = [""] + list(dict_clientes.keys())
 
     st.markdown("### 👤 Dados do Cliente")
     col_cad1, col_cad2 = st.columns(2)
     with col_cad1:
-        # Selecionar cliente já existente ou digitar um novo
         cliente_selecionado = st.selectbox("Buscar Cliente Cadastrado (Opcional)", lista_nomes_clientes)
         
-        # Preencher automático se selecionar da lista
         def_doc = dict_clientes[cliente_selecionado]["documento"] if cliente_selecionado in dict_clientes else ""
         def_tel = dict_clientes[cliente_selecionado]["telefone"] if cliente_selecionado in dict_clientes else ""
         def_end = dict_clientes[cliente_selecionado]["endereco"] if cliente_selecionado in dict_clientes else ""
@@ -115,6 +112,18 @@ if menu == "Criar Orçamento":
         endereco = st.text_input("Endereço", value=def_end or "")
 
     st.markdown("---")
+    st.subheader("🛠️ Serviços e Verificações")
+    
+    # Seção de Sim / Não para os serviços adicionais
+    col_s1, col_s2, col_s3 = st.columns(3)
+    with col_s1:
+        srv_instalacao = st.selectbox("Instalação inclusa?", ["Não", "Sim"])
+    with col_s2:
+        srv_configuracao = st.selectbox("Configuração / Backup?", ["Não", "Sim"])
+    with col_s3:
+        srv_suporte = st.selectbox("Suporte técnico estendido?", ["Não", "Sim"])
+
+    st.markdown("---")
     st.subheader("🛍️ Itens do Orçamento")
 
     if not produtos_db:
@@ -124,9 +133,7 @@ if menu == "Criar Orçamento":
         st.session_state.carrinho = []
 
     if produtos_db:
-        # Separar produtos por categoria (CFTV e Informática)
         cat_escolhida = st.selectbox("Selecione a Categoria / Setor", ["CFTV", "Informática"])
-        
         produtos_filtrados = [p for p in produtos_db if p[2].strip().lower() == cat_escolhida.lower()]
         
         if not produtos_filtrados:
