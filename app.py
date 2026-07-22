@@ -114,10 +114,12 @@ if menu == "Criar Orçamento":
     st.markdown("---")
     st.subheader("🛠️ Serviço, Instalação e Defeito")
     
-    col_s1, col_s2 = st.columns([1, 2])
+    col_s1, col_s2, col_s3 = st.columns([1, 1, 2])
     with col_s1:
         srv_instalacao = st.selectbox("Instalação inclusa?", ["Não", "Sim"])
     with col_s2:
+        valor_instalacao = st.number_input("Valor da Instalação (R$)", min_value=0.0, value=0.0, format="%.2f")
+    with col_s3:
         desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
 
     col_d1, col_d2 = st.columns([1, 2])
@@ -162,19 +164,31 @@ if menu == "Criar Orçamento":
                     })
                     st.success("Item adicionado!")
 
-    if st.session_state.carrinho:
-        st.markdown("### Carrinho Atual")
-        subtotal_geral = 0
-        novos_itens = []
-        for i, item in enumerate(st.session_state.carrinho):
-            col_i1, col_i2, col_i3, col_i4 = st.columns([3, 1, 1, 1])
-            col_i1.write(item["produto"])
-            col_i2.write(f"Qtd: {item['quantidade']}")
-            col_i3.write(f"R$ {item['subtotal']:.2f}")
-            subtotal_geral += item["subtotal"]
-            if not col_i4.button("🗑️", key=f"del_{i}"):
-                novos_itens.append(item)
-        st.session_state.carrinho = novos_itens
+    # Exibição do Carrinho e Valor de Instalação somados
+    # Vamos considerar o subtotal dos produtos + o valor da instalação (se Sim e valor > 0)
+    total_instalacao_calculado = valor_instalacao if srv_instalacao == "Sim" else 0.0
+
+    if st.session_state.carrinho or total_instalacao_calculado > 0:
+        if st.session_state.carrinho:
+            st.markdown("### Carrinho Atual")
+            subtotal_produtos = 0
+            novos_itens = []
+            for i, item in enumerate(st.session_state.carrinho):
+                col_i1, col_i2, col_i3, col_i4 = st.columns([3, 1, 1, 1])
+                col_i1.write(item["produto"])
+                col_i2.write(f"Qtd: {item['quantidade']}")
+                col_i3.write(f"R$ {item['subtotal']:.2f}")
+                subtotal_produtos += item["subtotal"]
+                if not col_i4.button("🗑️", key=f"del_{i}"):
+                    novos_itens.append(item)
+            st.session_state.carrinho = novos_itens
+        else:
+            subtotal_produtos = 0.0
+
+        if srv_instalacao == "Sim" and valor_instalacao > 0:
+            st.markdown(f"**Taxa / Valor de Instalação:** R$ {valor_instalacao:.2f}")
+
+        subtotal_geral = subtotal_produtos + total_instalacao_calculado
 
         # Campo de Desconto
         col_desc1, col_desc2 = st.columns([2, 2])
@@ -224,6 +238,13 @@ if menu == "Criar Orçamento":
                         VALUES (?, ?, ?, ?, ?)
                     """, (num_orc, item["produto"], item["quantidade"], item["preco_unitario"], item["subtotal"]))
                 
+                # Se houver valor de instalação, podemos salvar como um item opcional ou tratá-lo no orçamento se necessário
+                if srv_instalacao == "Sim" and valor_instalacao > 0:
+                    cursor.execute("""
+                        INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
+                        VALUES (?, ?, ?, ?, ?)
+                    """, (num_orc, f"Serviço de Instalação: {desc_servico if desc_servico else 'Instalação padrão'}", 1, valor_instalacao, valor_instalacao))
+
                 conn.commit()
                 conn.close()
                 st.session_state.carrinho = []
