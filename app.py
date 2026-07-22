@@ -2,14 +2,40 @@ import streamlit as st
 import sqlite3
 import datetime
 import requests
+import hashlib
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
+
+# Função para criptografar senhas por segurança
+def hash_senha(senha):
+    return hashlib.sha256(str(senha).encode()).hexdigest()
 
 # 1. BANCO DE DADOS E MIGRAÇÃO
 def iniciar_banco():
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
+    
+    # Tabela de Usuários
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS usuarios (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario TEXT UNIQUE NOT NULL,
+        senha TEXT NOT NULL,
+        perfil TEXT NOT NULL
+    )
+    """)
+    
+    # Tabela de Logs de Auditoria (quem alterou/criou e quando)
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        usuario TEXT NOT NULL,
+        acao TEXT NOT NULL,
+        detalhes TEXT NOT NULL,
+        data TEXT NOT NULL
+    )
+    """)
     
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS produtos (
@@ -33,7 +59,8 @@ def iniciar_banco():
         validade TEXT,
         pagamento TEXT,
         data TEXT NOT NULL,
-        total REAL NOT NULL
+        total REAL NOT NULL,
+        criado_por TEXT
     )
     """)
     
@@ -47,10 +74,26 @@ def iniciar_banco():
         subtotal REAL NOT NULL
     )
     """)
-    conn.commit()
+    
+    # Cria um usuário Admin padrão se não existir nenhum
+    cursor.execute("SELECT COUNT(*) FROM usuarios")
+    if cursor.fetchone()[0] == 0:
+        senha_padrao = hash_senha("admin123")
+        cursor.execute("INSERT INTO usuarios (usuario, senha, perfil) VALUES (?, ?, ?)", ("admin", senha_padrao, "Admin"))
+        conn.commit()
+        
     conn.close()
 
 iniciar_banco()
+
+# Função para registrar ações no Log
+def registrar_log(usuario, acao, detalhes):
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    data_hora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    cursor.execute("INSERT INTO logs (usuario, acao, detalhes, data) VALUES (?, ?, ?, ?)", (usuario, acao, detalhes, data_hora))
+    conn.commit()
+    conn.close()
 
 # Função para buscar endereço pelo CEP (ViaCEP)
 def buscar_cep(cep):
@@ -115,9 +158,59 @@ def formatar_telefone(tel):
         return f"({tel_limpo[:2]}) {tel_limpo[2:6]}-{tel_limpo[6:]}"
     return tel
 
-# MENU LATERAL
-st.sidebar.title("🛠️ VCS Informática")
-menu = st.sidebar.radio("Navegação", ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"])
+# CONTROLE DE SESSÃO / LOGIN
+if "autenticado" not in st.session_state:
+    st.session_state.autenticado = False
+if "usuario_atual" not in st.session_state:
+    st.session_state.usuario_atual = ""
+if "perfil_atual" not in st.session_state:
+    st.session_state.perfil_atual = ""
+
+# TELA DE LOGIN SE NÃO ESTIVER AUTENTICADO
+if not st.session_state.autenticado:
+    st.title("🔐 VCS Informática - Login")
+    with st.form("form_login"):
+        user_input = st.text_input("Usuário")
+        senha_input = st.text_input("Senha", type="password")
+        btn_login = st.form_submit_button("Entrar")
+        
+        if btn_login:
+            conn = sqlite3.connect("banco_vcs.db")
+            cursor = conn.cursor()
+            cursor.execute("SELECT perfil FROM usuarios WHERE usuario = ? AND senha = ?", (user_input, hash_senha(senha_input)))
+            res = cursor.fetchone()
+            conn.close()
+            
+            if res:
+                st.session_state.autenticado = True
+                st.session_state.usuario_atual = user_input
+                st.session_state.perfil_atual = res[0]
+                registrar_log(user_input, "LOGIN", "Usuário entrou no sistema")
+                st.success("Login realizado com sucesso!")
+                st.rerun()
+            else:
+                st.error("Usuário ou senha incorretos! (Padrão inicial: usuário 'admin', senha 'admin123')")
+    
+    st.stop() # Interrompe a execução do restante se não estiver logado
+
+# MENU LATERAL (Já logado)
+st.sidebar.title(f"🛠️ VCS Informática")
+st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual})")
+
+opcoes_menu = ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"]
+
+# Se for Admin, adiciona opções extras no menu
+if st.session_state.perfil_atual == "Admin":
+    opcoes_menu.extend(["Gerenciar Usuários", "Logs de Auditoria"])
+
+menu = st.sidebar.radio("Navegação", opcoes_menu)
+
+if st.sidebar.button("🚪 Sair do Sistema"):
+    registrar_log(st.session_state.usuario_atual, "LOGOUT", "Usuário saiu do sistema")
+    st.session_state.autenticado = False
+    st.session_state.usuario_atual = ""
+    st.session_state.perfil_atual = ""
+    st.rerun()
 
 # ---------------------------------------------------------
 # TELA 1: CRIAR ORÇAMENTO
@@ -167,11 +260,8 @@ if menu == "Criar Orçamento":
             documento = st.text_input("CPF ou CNPJ", value=st.session_state.form_documento, placeholder="Ex: 000.000.000-00")
         with col_cad2:
             telefone = st.text_input("Telefone / WhatsApp", value=st.session_state.form_telefone, placeholder="Ex: (71) 99999-9999")
-            
-            # Campo de CEP e Consulta Automática
             cep_input = st.text_input("CEP (Busca automática em Salvador)", value=st.session_state.form_cep, placeholder="Ex: 40010000")
             
-            # Se o usuário preencheu o CEP, tenta buscar o endereço
             endereco_buscado = ""
             if cep_input:
                 resultado_cep = buscar_cep(cep_input)
@@ -323,9 +413,9 @@ if menu == "Criar Orçamento":
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (num_orc, cliente, doc_fmt, tel_fmt, endereco, garantia, validade, pagamento, data_atual, total_geral))
+                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (num_orc, cliente, doc_fmt, tel_fmt, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual))
                 
                 for item in st.session_state.carrinho:
                     cursor.execute("""
@@ -341,6 +431,8 @@ if menu == "Criar Orçamento":
 
                 conn.commit()
                 conn.close()
+                
+                registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para o cliente {cliente}")
                 st.session_state.carrinho = []
                 st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
 
@@ -372,6 +464,7 @@ elif menu == "Consultar Orçamentos":
                 st.write(f"**Telefone:** {orc[4]}")
                 st.write(f"**Endereço:** {orc[5]}")
                 st.write(f"**Garantia:** {orc[6]} | **Validade:** {orc[7]} | **Pagamento:** {orc[8]}")
+                st.write(f"**Criado por:** {orc[11] if len(orc) > 11 and orc[11] else 'Não registrado'}")
                 
                 conn = sqlite3.connect("banco_vcs.db")
                 cursor = conn.cursor()
@@ -383,16 +476,19 @@ elif menu == "Consultar Orçamentos":
                 for item in itens:
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
-                st.markdown("---")
-                if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
-                    conn = sqlite3.connect("banco_vcs.db")
-                    cursor = conn.cursor()
-                    cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
-                    cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
-                    conn.commit()
-                    conn.close()
-                    st.success(f"Orçamento {orc[1]} excluído com sucesso!")
-                    st.rerun()
+                # Apenas Admin pode excluir orçamentos
+                if st.session_state.perfil_atual == "Admin":
+                    st.markdown("---")
+                    if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
+                        conn = sqlite3.connect("banco_vcs.db")
+                        cursor = conn.cursor()
+                        cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
+                        cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
+                        conn.commit()
+                        conn.close()
+                        registrar_log(st.session_state.usuario_atual, "EXCLUIR ORÇAMENTO", f"Orçamento {orc[1]} excluído")
+                        st.success(f"Orçamento {orc[1]} excluído com sucesso!")
+                        st.rerun()
 
 # ---------------------------------------------------------
 # TELA 3: GERENCIAR PRODUTOS
@@ -400,32 +496,34 @@ elif menu == "Consultar Orçamentos":
 elif menu == "Gerenciar Produtos":
     st.subheader("📦 Gerenciamento de Produtos")
     
-    with st.form("cad_prod"):
-        st.markdown("### Cadastrar Novo Produto")
-        codigo = st.text_input("Código do Produto")
-        descricao = st.text_input("Descrição do Produto")
-        preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
-        categoria = st.selectbox("Categoria", ["CFTV", "Informática"])
-        submit = st.form_submit_button("Cadastrar Produto")
-        
-        if submit:
-            if descricao and preco > 0:
-                try:
-                    conn = sqlite3.connect("banco_vcs.db")
-                    cursor = conn.cursor()
-                    cursor.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
-                    conn.commit()
-                    conn.close()
-                    st.success("Produto cadastrado com sucesso!")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Erro ao cadastrar (código duplicado?): {e}")
-            else:
-                st.error("Preencha a descrição e um preço válido.")
+    # Apenas Admin pode cadastrar novos produtos
+    if st.session_state.perfil_atual == "Admin":
+        with st.form("cad_prod"):
+            st.markdown("### Cadastrar Novo Produto")
+            codigo = st.text_input("Código do Produto")
+            descricao = st.text_input("Descrição do Produto")
+            preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
+            categoria = st.selectbox("Categoria", ["CFTV", "Informática"])
+            submit = st.form_submit_button("Cadastrar Produto")
+            
+            if submit:
+                if descricao and preco > 0:
+                    try:
+                        conn = sqlite3.connect("banco_vcs.db")
+                        cursor = conn.cursor()
+                        cursor.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
+                        conn.commit()
+                        conn.close()
+                        registrar_log(st.session_state.usuario_atual, "CRIAR PRODUTO", f"Produto {descricao} cadastrado")
+                        st.success("Produto cadastrado com sucesso!")
+                        st.rerun()
+                    except Exception as e:
+                        st.error(f"Erro ao cadastrar (código duplicado?): {e}")
+                else:
+                    st.error("Preencha a descrição e um preço válido.")
+        st.markdown("---")
 
-    st.markdown("---")
     st.subheader("Lista e Edição de Produtos Cadastrados")
-    
     conn = sqlite3.connect("banco_vcs.db")
     cursor = conn.cursor()
     cursor.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
@@ -447,7 +545,7 @@ elif menu == "Gerenciar Produtos":
                     with col_b1:
                         salvar_edicao = st.form_submit_button("💾 Salvar Alterações")
                     with col_b2:
-                        excluir_prod = st.form_submit_button("🗑️ Excluir Produto")
+                        excluir_prod = st.form_submit_button("🗑️ Excluir Produto") if st.session_state.perfil_atual == "Admin" else False
 
                     if salvar_edicao:
                         preco_convertido = converter_para_float(txt_novo_preco)
@@ -457,6 +555,7 @@ elif menu == "Gerenciar Produtos":
                             cursor.execute("UPDATE produtos SET descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_desc, preco_convertido, nova_cat, p_id))
                             conn.commit()
                             conn.close()
+                            registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado para {novo_desc} - {preco_convertido}")
                             st.success("Produto atualizado com sucesso!")
                             st.rerun()
                         else:
@@ -468,11 +567,12 @@ elif menu == "Gerenciar Produtos":
                         cursor.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
                         conn.commit()
                         conn.close()
+                        registrar_log(st.session_state.usuario_atual, "EXCLUIR PRODUTO", f"Produto {p_desc} excluído")
                         st.success("Produto excluído com sucesso!")
                         st.rerun()
 
 # ---------------------------------------------------------
-# TELA 4: GERENCIAR / PESQUISAR CLIENTES
+# TELA 4: GERENCIAR CLIENTES
 # ---------------------------------------------------------
 elif menu == "Gerenciar Clientes":
     st.subheader("👥 Pesquisa e Gerenciamento de Clientes")
@@ -517,5 +617,78 @@ elif menu == "Gerenciar Clientes":
                             """, (novo_nome, novo_doc, novo_tel, novo_end, c_nome))
                             conn.commit()
                             conn.close()
+                            registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado para {novo_nome}")
                             st.success("Dados do cliente atualizados com sucesso em todos os orçamentos!")
                             st.rerun()
+
+# ---------------------------------------------------------
+# TELA 5: GERENCIAR USUÁRIOS (APENAS ADMIN)
+# ---------------------------------------------------------
+elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
+    st.subheader("👤 Gerenciamento de Usuários do Sistema")
+    
+    with st.form("cad_usuario"):
+        st.markdown("### Criar Novo Usuário")
+        novo_user = st.text_input("Nome de Usuário (Login)")
+        nova_senha = st.text_input("Senha", type="password")
+        novo_perfil = st.selectbox("Perfil de Acesso", ["Funcionário", "Admin"])
+        btn_criar_user = st.form_submit_button("Cadastrar Usuário")
+        
+        if btn_criar_user:
+            if novo_user and nova_senha:
+                try:
+                    conn = sqlite3.connect("banco_vcs.db")
+                    cursor = conn.cursor()
+                    cursor.execute("INSERT INTO usuarios (usuario, senha, perfil) VALUES (?, ?, ?)", (novo_user, hash_senha(nova_senha), novo_perfil))
+                    conn.commit()
+                    conn.close()
+                    registrar_log(st.session_state.usuario_atual, "CRIAR USUÁRIO", f"Usuário {novo_user} criado com perfil {novo_perfil}")
+                    st.success(f"Usuário '{novo_user}' criado com sucesso!")
+                    st.rerun()
+                except:
+                    st.error("Erro: Este nome de usuário já existe.")
+            else:
+                st.error("Preencha o usuário e a senha.")
+
+    st.markdown("---")
+    st.subheader("Usuários Cadastrados")
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT id, usuario, perfil FROM usuarios")
+    usuarios_cad = cursor.fetchall()
+    conn.close()
+
+    for u in usuarios_cad:
+        col_u1, col_u2, col_u3 = st.columns([2, 2, 1])
+        col_u1.write(f"**Usuário:** {u[1]}")
+        col_u2.write(f"**Perfil:** {u[2]}")
+        if u[1] != "admin": # Evita excluir o admin principal
+            if col_u3.button("🗑️ Excluir", key=f"del_user_{u[0]}"):
+                conn = sqlite3.connect("banco_vcs.db")
+                cursor = conn.cursor()
+                cursor.execute("DELETE FROM usuarios WHERE id = ?", (u[0],))
+                conn.commit()
+                conn.close()
+                registrar_log(st.session_state.usuario_atual, "EXCLUIR USUÁRIO", f"Usuário {u[1]} excluído")
+                st.success(f"Usuário {u[1]} excluído!")
+                st.rerun()
+
+# ---------------------------------------------------------
+# TELA 6: LOGS DE AUDITORIA (APENAS ADMIN)
+# ---------------------------------------------------------
+elif menu == "Logs de Auditoria" and st.session_state.perfil_atual == "Admin":
+    st.subheader("📋 Logs de Auditoria (Histórico de Alterações)")
+    
+    conn = sqlite3.connect("banco_vcs.db")
+    cursor = conn.cursor()
+    cursor.execute("SELECT usuario, acao, detalhes, data FROM logs ORDER BY id DESC")
+    logs = cursor.fetchall()
+    conn.close()
+
+    if not logs:
+        st.info("Nenhum registro de log encontrado.")
+    else:
+        for log in logs:
+            usuario, acao, detalhes, data = log
+            st.markdown(f"🕒 **{data}** | 👤 **{usuario}** | ⚡ **{acao}**: {detalhes}")
+            st.divider()
