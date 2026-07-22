@@ -1,5 +1,4 @@
 import streamlit as st
-import streamlit.components.v1 as components
 import sqlite3
 import datetime
 import requests
@@ -56,6 +55,7 @@ def iniciar_banco():
     )
     """)
     
+    # Garante a tabela de clientes com UNIQUE no nome para evitar erros de conflito
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS clientes (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -134,6 +134,22 @@ def buscar_cep(cep):
         except:
             pass
     return None
+
+def formatar_documento(doc):
+    digitos = "".join(filter(str.isdigit, str(doc)))
+    if len(digitos) == 11:
+        return f"{digitos[:3]}.{digitos[3:6]}.{digitos[6:9]}-{digitos[9:]}"
+    elif len(digitos) == 14:
+        return f"{digitos[:2]}.{digitos[2:5]}.{digitos[5:8]}/{digitos[8:12]}-{digitos[12:]}"
+    return doc
+
+def formatar_telefone(tel):
+    digitos = "".join(filter(str.isdigit, str(tel)))
+    if len(digitos) == 11:
+        return f"{digitos[:2]} {digitos[2]} {digitos[3:7]}-{digitos[7:]}"
+    elif len(digitos) == 10:
+        return f"{digitos[:2]} {digitos[2:6]}-{digitos[6:]}"
+    return tel
 
 def gerar_numero_orcamento():
     conn = sqlite3.connect("banco_vcs.db")
@@ -299,9 +315,12 @@ if menu == "Criar Orçamento":
         
         if btn_atualizar_dados:
             if cliente.strip():
+                doc_formatado = formatar_documento(documento.strip())
+                tel_formatado = formatar_telefone(telefone.strip())
+                
                 st.session_state.form_cliente = cliente.strip()
-                st.session_state.form_documento = documento.strip()
-                st.session_state.form_telefone = telefone.strip()
+                st.session_state.form_documento = doc_formatado
+                st.session_state.form_telefone = tel_formatado
                 st.session_state.form_endereco = endereco.strip()
                 
                 conn = sqlite3.connect("banco_vcs.db")
@@ -313,7 +332,7 @@ if menu == "Criar Orçamento":
                         documento = excluded.documento,
                         telefone = excluded.telefone,
                         endereco = excluded.endereco
-                """, (cliente.strip(), documento.strip(), telefone.strip(), endereco.strip()))
+                """, (cliente.strip(), doc_formatado, tel_formatado, endereco.strip()))
                 conn.commit()
                 conn.close()
                 
@@ -321,55 +340,6 @@ if menu == "Criar Orçamento":
                 st.rerun()
             else:
                 st.error("Preencha o nome do cliente.")
-
-    # Script JavaScript otimizado para aplicar máscaras fluidas em tempo real sem apagar o texto
-    components.html("""
-    <script>
-    const inputs = window.parent.document.querySelectorAll('input');
-    inputs.forEach(input => {
-        const label = input.getAttribute('aria-label');
-        if (label && label.includes('CPF ou CNPJ')) {
-            if (!input.dataset.masked) {
-                input.dataset.masked = 'true';
-                input.addEventListener('input', function (e) {
-                    let v = e.target.value.replace(/\\D/g, "");
-                    if (v.length > 14) v = v.slice(0, 14);
-                    if (v.length <= 11) {
-                        v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
-                        v = v.replace(/(\\d{3})(\\d)/, "$1.$2");
-                        v = v.replace(/(\\d{3})(\\d{1,2})$/, "$1-$2");
-                    } else {
-                        v = v.replace(/^(\\d{2})(\\d)/, "$1.$2");
-                        v = v.replace(/^(\\d{2})\\.(\\d{3})(\\d)/, "$1.$2.$3");
-                        v = v.replace(/\\.(\\d{3})(\\d)/, "$1/$2");
-                        v = v.replace(/(\\d{4})(\\d{1,2})$/, "$1-$2");
-                    }
-                    e.target.value = v;
-                    e.target.dispatchEvent(new Event('input', { bubbles: true }));
-                });
-            }
-        }
-        if (label && label.includes('Telefone / Celular')) {
-            if (!input.dataset.masked) {
-                input.dataset.masked = 'true';
-                input.addEventListener('input', function (e) {
-                    let v = e.target.value.replace(/\\D/g, "");
-                    if (v.length > 11) v = v.slice(0, 11);
-                    if (v.length <= 10) {
-                        v = v.replace(/(\\d{2})(\\d)/, "$1 $2");
-                        v = v.replace(/(\\d{4})(\\d)/, "$1-$2");
-                    } else {
-                        v = v.replace(/(\\d{2})(\\d)/, "$1 $2 ");
-                        v = v.replace(/(\\d{1})(\\d{4})(\\d)/, "$1 $2-$3");
-                    }
-                    e.target.value = v;
-                    e.target.dispatchEvent(new Event('input', { bubbles: true }));
-                });
-            }
-        }
-    });
-    </script>
-    """, height=0)
 
     st.markdown("---")
     
@@ -650,7 +620,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         </html>
         """
         
-        components.html(html_orcamento, height=850, scrolling=True)
+        st.components.v1.html(html_orcamento, height=850, scrolling=True)
         st.stop()
 
 # ---------------------------------------------------------
@@ -833,6 +803,8 @@ elif menu == "Gerenciar Clientes":
                         if not novo_nome.strip():
                             st.error("O nome do cliente não pode ficar vazio.")
                         else:
+                            doc_f = formatar_documento(novo_doc.strip())
+                            tel_f = formatar_telefone(novo_tel.strip())
                             conn = sqlite3.connect("banco_vcs.db")
                             cursor = conn.cursor()
                             try:
@@ -840,7 +812,7 @@ elif menu == "Gerenciar Clientes":
                                     UPDATE clientes 
                                     SET nome = ?, documento = ?, telefone = ?, endereco = ? 
                                     WHERE id = ?
-                                """, (novo_nome.strip(), novo_doc.strip(), novo_tel.strip(), novo_end.strip(), c_id))
+                                """, (novo_nome.strip(), doc_f, tel_f, novo_end.strip(), c_id))
                                 conn.commit()
                                 conn.close()
                                 registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado para {novo_nome}")
