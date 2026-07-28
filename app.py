@@ -48,7 +48,6 @@ def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
 def iniciar_banco():
-    # Banco da Empresa (Orçamentos, Logs, Usuários)
     conn = conectar()
     cursor = conn.cursor()
     
@@ -120,7 +119,6 @@ def iniciar_banco():
         
     conn.close()
 
-    # Banco Global de Clientes
     conn_cli = conectar_clientes()
     cursor_cli = conn_cli.cursor()
     cursor_cli.execute("""
@@ -135,7 +133,6 @@ def iniciar_banco():
     conn_cli.commit()
     conn_cli.close()
 
-    # Banco Global de Produtos
     conn_prod = conectar_produtos()
     cursor_prod = conn_prod.cursor()
     cursor_prod.execute("""
@@ -152,11 +149,8 @@ def iniciar_banco():
 
 iniciar_banco()
 
-# Função unificada para carregar produtos de todas as fontes possíveis (Global + Bancos antigos das empresas)
 def carregar_todos_produtos():
     produtos_dict = {} 
-    
-    # 1. Busca no Banco Global
     try:
         conn_p = conectar_produtos()
         cursor_p = conn_p.cursor()
@@ -168,7 +162,6 @@ def carregar_todos_produtos():
     except:
         pass
 
-    # 2. Busca nos bancos antigos das empresas para recuperar caso tenham ficado lá
     for db_emp in EMPRESAS.values():
         if os.path.exists(db_emp):
             try:
@@ -334,9 +327,8 @@ if st.sidebar.button("🚪 Sair do Sistema"):
 # TELA 1: CRIAR ORÇAMENTO / PROPOSTA
 # ---------------------------------------------------------
 if menu == "Criar Orçamento / Proposta":
-    st.subheader(f"📝 Novo Documento — [{empresa_selecionada}]")
-    
-    tipo_documento = st.radio("Tipo de Documento", ["Orçamento", "Proposta"], horizontal=True)
+    tipo_documento = st.radio("Tipo de Documento", ["ORCAMENTO", "PROPOSTA"], horizontal=True)
+    st.subheader(f"📝 Novo {tipo_documento} — [{empresa_selecionada}]")
 
     produtos_db = carregar_todos_produtos()
 
@@ -432,7 +424,6 @@ if menu == "Criar Orçamento / Proposta":
 
     st.markdown("---")
     
-    # 🛠️ SERVIÇOS
     st.subheader("🛠️ Serviços")
     incluir_servicos = st.radio("Deseja adicionar serviço?", ["Não", "Sim"], horizontal=True, key="radio_servicos")
     
@@ -458,7 +449,7 @@ if menu == "Criar Orçamento / Proposta":
 
     st.markdown("---")
     
-    st.subheader("🛍️ Itens do Orçamento (Produtos)")
+    st.subheader(f"🛍️ Itens do {tipo_documento} (Produtos)")
     incluir_itens = st.radio("Deseja adicionar produtos do estoque neste documento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
     if "carrinho" not in st.session_state:
@@ -545,7 +536,7 @@ if menu == "Criar Orçamento / Proposta":
         with c1:
             garantia = st.text_input("Garantia", value="90 dias")
         with c2:
-            validade = st.text_input("Validade da Proposta", value="10 dias")
+            validade = st.text_input("Validade", value="10 dias")
         with c3:
             pagamento = st.text_input("Forma de Pagamento", value="À vista / PIX")
 
@@ -615,7 +606,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         logo_b64 = obter_logo_base64()
         tag_logo = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 80px; margin-bottom: 10px;" />' if logo_b64 else ''
         
-        tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORÇAMENTO"
+        tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORCAMENTO"
 
         html_orcamento = f"""
         <!DOCTYPE html>
@@ -687,7 +678,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
 
                 <div style="text-align: right; font-size: 16px; margin-bottom: 25px;">
                     <p style="margin: 5px 0;"><strong>Garantia:</strong> {orc_dados[6]}</p>
-                    <p style="margin: 5px 0;"><strong>Validade da Proposta:</strong> {orc_dados[7]}</p>
+                    <p style="margin: 5px 0;"><strong>Validade:</strong> {orc_dados[7]}</p>
                     <p style="margin: 5px 0;"><strong>Forma de Pagamento:</strong> {orc_dados[8]}</p>
                     <h2 style="color: #004080; margin-top: 15px;">Total Geral: {formatar_moeda(orc_dados[10])}</h2>
                 </div>
@@ -726,7 +717,7 @@ elif menu == "Consultar Documentos":
         st.info("Nenhum documento encontrado nesta empresa.")
     else:
         for orc in orcamentos:
-            tipo_doc_reg = orc[12] if len(orc) > 12 and orc[12] else "Orçamento"
+            tipo_doc_reg = orc[12] if len(orc) > 12 and orc[12] else "ORCAMENTO"
             with st.expander(f"[{tipo_doc_reg}] Nº {orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
                 st.write(f"**Tipo:** {tipo_doc_reg}")
                 st.write(f"**CPF/CNPJ:** {orc[3]}")
