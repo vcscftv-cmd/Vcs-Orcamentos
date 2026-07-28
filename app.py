@@ -765,6 +765,10 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                     <p style="margin: 5px 0;"><strong>Forma de Pagamento:</strong> {orc_dados[8]}</p>
                     <h2 style="color: #004080; margin-top: 15px;">Total Geral: {formatar_moeda(orc_dados[10])}</h2>
                 </div>
+
+                <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
+                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else empresa_selecionada}.</p>
+                </div>
             </div>
         </body>
         </html>
