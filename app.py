@@ -147,6 +147,38 @@ def iniciar_banco():
     conn_prod.commit()
     conn_prod.close()
 
+    # 🔄 MIGRAÇÃO ÚNICA: Importa produtos antigos das empresas para o banco global se faltarem
+    try:
+        conn_gp = conectar_produtos()
+        cursor_gp = conn_gp.cursor()
+        
+        # Pega descrições já existentes no global
+        cursor_gp.execute("SELECT descricao FROM produtos")
+        existentes_global = {row[0].strip().lower() for row in cursor_gp.fetchall()}
+
+        for db_emp in EMPRESAS.values():
+            if os.path.exists(db_emp):
+                try:
+                    conn_e = sqlite3.connect(db_emp)
+                    cursor_e = conn_e.cursor()
+                    cursor_e.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='produtos'")
+                    if cursor_e.fetchone():
+                        cursor_e.execute("SELECT codigo, descricao, preco, categoria FROM produtos")
+                        for p in cursor_e.fetchall():
+                            desc = p[1].strip()
+                            if desc.lower() not in existentes_global:
+                                # Insere no global
+                                codigo_val = p[0] if p[0] else ""
+                                cursor_gp.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo_val, desc, p[2], p[3]))
+                                existentes_global.add(desc.lower())
+                    conn_e.close()
+                except:
+                    pass
+        conn_gp.commit()
+        conn_gp.close()
+    except:
+        pass
+
 iniciar_banco()
 
 @st.cache_data(show_spinner=False, ttl=600)
@@ -406,7 +438,7 @@ if menu == "Criar Orçamento / Proposta":
                 conn_c.commit()
                 conn_c.close()
                 
-                st.cache_data.clear() # Limpa o cache para atualizar a lista de clientes
+                st.cache_data.clear()
                 st.success("Dados do cliente salvos e fixados com sucesso!")
                 st.rerun()
             else:
@@ -770,7 +802,7 @@ elif menu == "Gerenciar Produtos":
                         cursor_p.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
                         conn_p.commit()
                         conn_p.close()
-                        st.cache_data.clear() # Limpa o cache para recarregar o novo produto instantaneamente
+                        st.cache_data.clear()
                         registrar_log(st.session_state.usuario_atual, "CRIAR PRODUTO", f"Produto {descricao} cadastrado")
                         st.success("Produto cadastrado com sucesso!")
                         st.rerun()
