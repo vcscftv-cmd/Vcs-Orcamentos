@@ -9,7 +9,7 @@ import os
 import pandas as pd
 
 # Configuração da página para ocupar a largura total
-st.set_page_config(page_title="Sistema de Orçamentos e Propostas", page_icon="💻", layout="wide")
+st.set_page_config(page_title="Sistema de Orçamentos", page_icon="💻", layout="wide")
 
 # 🏢 DICIONÁRIO DE EMPRESAS E SEUS BANCOS DE DADOS SEPARADOS
 EMPRESAS = {
@@ -19,7 +19,7 @@ EMPRESAS = {
 }
 
 st.sidebar.title("🏢 Seleção de Empresa")
-empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa Atual:", list(EMPRESAS.keys()))
+empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa:", list(EMPRESAS.keys()))
 DB_ARQUIVO = EMPRESAS[empresa_selecionada]
 
 def conectar():
