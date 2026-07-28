@@ -7,9 +7,17 @@ import time
 import base64
 import os
 import pandas as pd
+import extra_streamlit_components as stx
 
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="Sistema de Orçamentos e Propostas", page_icon="💻", layout="wide")
+
+# Inicializar o gerenciador de cookies
+@st.cache_resource
+def get_manager():
+    return stx.CookieManager()
+
+cookie_manager = get_manager()
 
 # 🏢 BANCOS DE DADOS DAS EMPRESAS (ORÇAMENTOS E LOGS)
 EMPRESAS = {
@@ -292,6 +300,20 @@ if "ultimo_orcamento_imprimir" not in st.session_state:
 if "modo_edicao_orcamento" not in st.session_state:
     st.session_state.modo_edicao_orcamento = None
 
+# Verificação automática de cookie salvo ("Lembrar este computador")
+cookie_usuario = cookie_manager.get(cookie="usuario_sistema_salvo")
+if not st.session_state.autenticado and cookie_usuario:
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute("SELECT usuario, perfil FROM usuarios WHERE usuario = ?", (cookie_usuario,))
+    res_cookie = cursor.fetchone()
+    conn.close()
+    if res_cookie:
+        st.session_state.autenticado = True
+        st.session_state.usuario_atual = res_cookie[0]
+        st.session_state.perfil_atual = res_cookie[1]
+        st.session_state.ultimo_acesso = time.time()
+
 if st.session_state.autenticado:
     tempo_atual = time.time()
     inatividade = tempo_atual - st.session_state.ultimo_acesso
@@ -300,6 +322,7 @@ if st.session_state.autenticado:
         st.session_state.autenticado = False
         st.session_state.usuario_atual = ""
         st.session_state.perfil_atual = ""
+        cookie_manager.delete("usuario_sistema_salvo")
         st.warning("⚠️ Sessão expirada por inatividade. Faça login novamente.")
         st.rerun()
     else:
@@ -310,6 +333,7 @@ if not st.session_state.autenticado:
     with st.form("form_login"):
         user_input = st.text_input("Usuário")
         senha_input = st.text_input("Senha", type="password")
+        lembrar_computador = st.checkbox("Lembrar este computador (Manter conectado)")
         btn_login = st.form_submit_button("Entrar")
         
         if btn_login:
@@ -324,6 +348,11 @@ if not st.session_state.autenticado:
                 st.session_state.usuario_atual = user_input
                 st.session_state.perfil_atual = res[0]
                 st.session_state.ultimo_acesso = time.time()
+                
+                if lembrar_computador:
+                    expira_em = datetime.datetime.now() + datetime.timedelta(days=30)
+                    cookie_manager.set("usuario_sistema_salvo", user_input, expires_at=expira_em)
+                
                 registrar_log(user_input, "LOGIN", f"Usuário entrou no sistema ({empresa_selecionada})")
                 st.success("Login realizado com sucesso!")
                 st.rerun()
@@ -345,6 +374,7 @@ menu = st.sidebar.radio("Navegação", opcoes_menu)
 
 if st.sidebar.button("🚪 Sair do Sistema"):
     registrar_log(st.session_state.usuario_atual, "LOGOUT", "Usuário saiu do sistema manualmente")
+    cookie_manager.delete("usuario_sistema_salvo")
     st.session_state.autenticado = False
     st.session_state.usuario_atual = ""
     st.session_state.perfil_atual = ""
@@ -692,7 +722,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 <div class="header">
                     {tag_logo}
                     <h1>{empresa_selecionada}</h1>
-                    <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()}</h3>
+                    <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()} DE SERVIÇOS E PRODUTOS</h3>
                 </div>
                 
                 <div style="margin-bottom: 20px; font-size: 14px;">
