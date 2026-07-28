@@ -154,7 +154,7 @@ iniciar_banco()
 
 # Função unificada para carregar produtos de todas as fontes possíveis (Global + Bancos antigos das empresas)
 def carregar_todos_produtos():
-    produtos_dict = {} # Para evitar duplicatas baseado na descrição
+    produtos_dict = {} 
     
     # 1. Busca no Banco Global
     try:
@@ -179,7 +179,6 @@ def carregar_todos_produtos():
                     desc = p[0].strip()
                     if desc.lower() not in produtos_dict:
                         produtos_dict[desc.lower()] = (p[0], p[1], p[2])
-                        # Já aproveita e injeta no global para centralizar
                         conn_gp = conectar_produtos()
                         cursor_gp = conn_gp.cursor()
                         cursor_gp.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", ("", p[0], p[1], p[2]))
@@ -694,7 +693,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 </div>
 
                 <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
-                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orb_dados[11] else empresa_selecionada}.</p>
+                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else empresa_selecionada}.</p>
                 </div>
             </div>
         </body>
