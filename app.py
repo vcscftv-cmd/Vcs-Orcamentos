@@ -6,9 +6,24 @@ import hashlib
 import time
 import base64
 import os
+import pandas as pd
 
 # Configuração da página para ocupar a largura total
-st.set_page_config(page_title="VCS Informática - Orçamentos", page_icon="💻", layout="wide")
+st.set_page_config(page_title="Sistema de Orçamentos", page_icon="💻", layout="wide")
+
+# 🏢 DICIONÁRIO DE EMPRESAS E SEUS BANCOS DE DADOS SEPARADOS
+EMPRESAS = {
+    "VCS Informática": "vcs_informatica.db",
+    "STI TECNOLOGIA": "sti_tecnologia.db",
+    "VORTICE GRAFTENG": "vortice_grafteng.db"
+}
+
+st.sidebar.title("🏢 Seleção de Empresa")
+empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa Atual:", list(EMPRESAS.keys()))
+DB_ARQUIVO = EMPRESAS[empresa_selecionada]
+
+def conectar():
+    return sqlite3.connect(DB_ARQUIVO)
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA
 ARQUIVO_LOGO = "logo.png" 
@@ -23,7 +38,7 @@ def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
 def iniciar_banco():
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     
     cursor.execute("""
@@ -110,7 +125,7 @@ def iniciar_banco():
 iniciar_banco()
 
 def registrar_log(usuario, acao, detalhes):
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     data_hora = datetime.datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     cursor.execute("INSERT INTO logs (usuario, acao, detalhes, data) VALUES (?, ?, ?, ?)", (usuario, acao, detalhes, data_hora))
@@ -151,7 +166,7 @@ def formatar_telefone(tel):
     return tel
 
 def gerar_numero_orcamento():
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM orcamentos")
     qtd = cursor.fetchone()[0]
@@ -205,14 +220,14 @@ if st.session_state.autenticado:
         st.session_state.ultimo_acesso = time.time()
 
 if not st.session_state.autenticado:
-    st.title("🔐 VCS Informática - Login")
+    st.title(f"🔐 {empresa_selecionada} - Login")
     with st.form("form_login"):
         user_input = st.text_input("Usuário")
         senha_input = st.text_input("Senha", type="password")
         btn_login = st.form_submit_button("Entrar")
         
         if btn_login:
-            conn = sqlite3.connect("banco_vcs.db")
+            conn = conectar()
             cursor = conn.cursor()
             cursor.execute("SELECT perfil FROM usuarios WHERE usuario = ? AND senha = ?", (user_input, hash_senha(senha_input)))
             res = cursor.fetchone()
@@ -223,7 +238,7 @@ if not st.session_state.autenticado:
                 st.session_state.usuario_atual = user_input
                 st.session_state.perfil_atual = res[0]
                 st.session_state.ultimo_acesso = time.time()
-                registrar_log(user_input, "LOGIN", "Usuário entrou no sistema")
+                registrar_log(user_input, "LOGIN", f"Usuário entrou no sistema ({empresa_selecionada})")
                 st.success("Login realizado com sucesso!")
                 st.rerun()
             else:
@@ -231,8 +246,9 @@ if not st.session_state.autenticado:
     
     st.stop()
 
-st.sidebar.title(f"🛠️ VCS Informática")
+st.sidebar.markdown("---")
 st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual})")
+st.sidebar.info(f"📁 Banco Ativo: **{empresa_selecionada}**")
 
 opcoes_menu = ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"]
 
@@ -252,9 +268,9 @@ if st.sidebar.button("🚪 Sair do Sistema"):
 # TELA 1: CRIAR ORÇAMENTO
 # ---------------------------------------------------------
 if menu == "Criar Orçamento":
-    st.subheader("📝 Novo Orçamento")
+    st.subheader(f"📝 Novo Orçamento — [{empresa_selecionada}]")
     
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT descricao, preco, categoria FROM produtos")
     produtos_db = cursor.fetchall()
@@ -322,10 +338,8 @@ if menu == "Criar Orçamento":
                 st.session_state.form_telefone = tel_formatado
                 st.session_state.form_endereco = endereco.strip()
                 
-                conn = sqlite3.connect("banco_vcs.db")
+                conn = conectar()
                 cursor = conn.cursor()
-                
-                # Verificação manual compatível com qualquer banco (evita erro de UNIQUE ausente)
                 cursor.execute("SELECT id FROM clientes WHERE nome = ?", (cliente.strip(),))
                 cliente_existe = cursor.fetchone()
                 
@@ -351,38 +365,36 @@ if menu == "Criar Orçamento":
 
     st.markdown("---")
     
-    st.subheader("🛠️ Serviço e Instalação")
-    incluir_servico = st.radio("Deseja incluir Serviço / Instalação neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_servico")
-    
-    valor_instalacao = 0.0
-    desc_servico = ""
-    srv_instalacao = "Não"
+    # 🛠️ MÚLTIPLOS SERVIÇOS E INSTALAÇÕES (TABELA DINÂMICA)
+    st.subheader("🛠️ Serviços e Instalações (Múltiplos Campos)")
+    st.write("Adicione quantos serviços, taxas ou instalações precisar, informando a descrição, quantidade e o preço unitário.")
 
-    if incluir_servico == "Sim":
-        srv_instalacao = "Sim"
-        col_s1, col_s2 = st.columns([1, 2])
-        with col_s1:
-            txt_valor_inst = st.text_input("Valor da Instalação (R$)", value="0,00", placeholder="Ex: 150,00 ou 1000")
-            valor_instalacao = converter_para_float(txt_valor_inst)
-        with col_s2:
-            desc_servico = st.text_input("Descrição do Serviço / Observações", placeholder="Ex: Passagem de cabos, configuração de rede...")
+    if "df_servicos_state" not in st.session_state:
+        st.session_state.df_servicos_state = pd.DataFrame([
+            {"Descrição do Serviço": "Instalação / Configuração", "Qtd": 1.0, "Preço Unitário (R$)": 0.0}
+        ])
+
+    df_servicos_editado = st.data_editor(
+        st.session_state.df_servicos_state,
+        num_rows="dynamic",
+        use_container_width=True,
+        key="editor_servicos_dinamico"
+    )
+    st.session_state.df_servicos_state = df_servicos_editado
 
     st.markdown("---")
     
     st.subheader("⚠️ Defeito Relatado")
     incluir_defeito = st.radio("Deseja relatar algum defeito no equipamento?", ["Não", "Sim"], horizontal=True, key="radio_defeito")
     
-    possui_defeito = "Não"
     desc_defeito = ""
-
     if incluir_defeito == "Sim":
-        possui_defeito = "Sim"
-        desc_defeito = st.text_input("Descrição do Defeito", placeholder="Ex: Equipamento não liga, sem imagem na câmera...")
+        desc_defeito = st.text_input("Descrição do Defeito", placeholder="Ex: Equipamento não liga...")
 
     st.markdown("---")
     
-    st.subheader("🛍️ Itens do Orçamento")
-    incluir_itens = st.radio("Deseja adicionar itens (produtos) neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
+    st.subheader("🛍️ Itens do Orçamento (Produtos)")
+    incluir_itens = st.radio("Deseja adicionar produtos do estoque neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
     if "carrinho" not in st.session_state:
         st.session_state.carrinho = []
@@ -406,7 +418,7 @@ if menu == "Criar Orçamento":
                 with col_p3:
                     st.text("")
                     st.text("")
-                    if st.button("Adicionar Item"):
+                    if st.button("Adicionar Produto"):
                         preco_unit = opcoes_produtos[produto_selecionado]
                         
                         item_encontrado = False
@@ -425,13 +437,31 @@ if menu == "Criar Orçamento":
                                 "preco_unitario": preco_unit,
                                 "subtotal": subtotal
                             })
-                        st.success("Item adicionado / atualizado!")
+                        st.success("Produto adicionado ao carrinho!")
 
-    total_instalacao_calculado = valor_instalacao if srv_instalacao == "Sim" else 0.0
+    # Cálculo dos serviços da tabela dinâmica
+    subtotal_servicos = 0.0
+    lista_servicos_processados = []
+    try:
+        for index, row in df_servicos_editado.iterrows():
+            desc_s = str(row.get("Descrição do Serviço", "")).strip()
+            qtd_s = float(row.get("Qtd", 0))
+            preco_s = float(row.get("Preço Unitário (R$)", 0))
+            if desc_s and desc_s != "nan" and qtd_s > 0 and preco_s > 0:
+                sub_s = qtd_s * preco_s
+                subtotal_servicos += sub_s
+                lista_servicos_processados.append({
+                    "produto": desc_s,
+                    "quantidade": int(qtd_s),
+                    "preco_unitario": preco_s,
+                    "subtotal": sub_s
+                })
+    except:
+        pass
 
-    if st.session_state.carrinho or total_instalacao_calculado > 0:
+    if st.session_state.carrinho or subtotal_servicos > 0:
         if st.session_state.carrinho:
-            st.markdown("### Carrinho Atual")
+            st.markdown("### Carrinho de Produtos")
             subtotal_produtos = 0
             novos_itens = []
             for i, item in enumerate(st.session_state.carrinho):
@@ -446,10 +476,7 @@ if menu == "Criar Orçamento":
         else:
             subtotal_produtos = 0.0
 
-        if srv_instalacao == "Sim" and valor_instalacao > 0:
-            st.markdown(f"**Taxa / Valor de Instalação:** {formatar_moeda(valor_instalacao)}")
-
-        subtotal_geral = subtotal_produtos + total_instalacao_calculado
+        subtotal_geral = subtotal_produtos + subtotal_servicos
 
         col_desc1, col_desc2 = st.columns([2, 2])
         with col_desc1:
@@ -484,49 +511,50 @@ if menu == "Criar Orçamento":
                 num_orc = gerar_numero_orcamento()
                 data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
-                conn = sqlite3.connect("banco_vcs.db")
+                conn = conectar()
                 cursor = conn.cursor()
                 cursor.execute("""
                     INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual))
                 
+                # Salva produtos do carrinho
                 for item in st.session_state.carrinho:
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
                         VALUES (?, ?, ?, ?, ?)
                     """, (num_orc, item["produto"], item["quantidade"], item["preco_unitario"], item["subtotal"]))
                 
-                if srv_instalacao == "Sim" and valor_instalacao > 0:
-                    nome_servico_final = desc_servico if desc_servico.strip() else "Serviço de Instalação"
+                # Salva serviços da tabela dinâmica
+                for srv in lista_servicos_processados:
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
                         VALUES (?, ?, ?, ?, ?)
-                    """, (num_orc, nome_servico_final, 1, valor_instalacao, valor_instalacao))
+                    """, (num_orc, srv["produto"], srv["quantidade"], srv["preco_unitario"], srv["subtotal"]))
 
                 conn.commit()
                 conn.close()
                 
-                registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para o cliente {cliente}")
+                registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para {cliente} em {empresa_selecionada}")
                 st.session_state.carrinho = []
                 st.session_state.ultimo_orcamento_imprimir = num_orc
-                st.success(f"Orçamento nº {num_orc} salvo com sucesso no banco de dados!")
+                st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
                 st.rerun()
 
     if st.session_state.ultimo_orcamento_imprimir:
         st.markdown("---")
-        st.success(f"🖨️ O último orçamento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto para impressão ou salvamento em PDF!")
-        if st.button("📄 Abrir Página de Impressão / PDF do Orçamento Recente"):
+        st.success(f"🖨️ O último orçamento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto!")
+        if st.button("📄 Abrir Página de Impressão / PDF"):
             st.session_state.modo_impressao = st.session_state.ultimo_orcamento_imprimir
             st.rerun()
 
 # ---------------------------------------------------------
-# TELA DE IMPRESSÃO / PDF (Modo dedicado)
+# TELA DE IMPRESSÃO / PDF
 # ---------------------------------------------------------
 if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
     num_alvo = st.session_state.modo_impressao
     
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT * FROM orcamentos WHERE numero_orcamento = ?", (num_alvo,))
     orc_dados = cursor.fetchone()
@@ -573,8 +601,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 
                 <div class="header">
                     {tag_logo}
-                    <h1>VCS Informática</h1>
-                    <p style="margin: 5px 0 0 0; font-size: 14px; color: #555;">Manutenção, Redes, CFTV e Suprimentos</p>
+                    <h1>{empresa_selecionada}</h1>
                     <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
                     <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
                 </div>
@@ -590,7 +617,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 <table>
                     <thead>
                         <tr>
-                            <th>Descrição do Item / Produto</th>
+                            <th>Descrição do Item / Serviço</th>
                             <th style="text-align: center;">Qtd</th>
                             <th style="text-align: right;">Preço Unit.</th>
                             <th style="text-align: right;">Subtotal</th>
@@ -621,7 +648,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 </div>
 
                 <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
-                    <p>Obrigado pela preferência! Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else 'VCS Informática'}.</p>
+                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else empresa_selecionada}.</p>
                 </div>
             </div>
         </body>
@@ -635,11 +662,11 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
 # TELA 2: CONSULTAR ORÇAMENTOS
 # ---------------------------------------------------------
 elif menu == "Consultar Orçamentos":
-    st.subheader("🔍 Consultar e Pesquisar Orçamentos")
+    st.subheader(f"🔍 Consultar Orçamentos — [{empresa_selecionada}]")
     
     pesquisa = st.text_input("Pesquisar por Nome do Cliente ou CPF/CNPJ:")
 
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     
     if pesquisa:
@@ -651,7 +678,7 @@ elif menu == "Consultar Orçamentos":
     conn.close()
 
     if not orcamentos:
-        st.info("Nenhum orçamento encontrado.")
+        st.info("Nenhum orçamento encontrado nesta empresa.")
     else:
         for orc in orcamentos:
             with st.expander(f"{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
@@ -663,7 +690,7 @@ elif menu == "Consultar Orçamentos":
                 criado_por_val = orc[11] if len(orc) > 11 and orc[11] else 'Não registrado'
                 st.write(f"**Criado por:** {criado_por_val}")
                 
-                conn = sqlite3.connect("banco_vcs.db")
+                conn = conectar()
                 cursor = conn.cursor()
                 cursor.execute("SELECT produto, quantidade, preco_unitario, subtotal FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
                 itens = cursor.fetchall()
@@ -682,7 +709,7 @@ elif menu == "Consultar Orçamentos":
                 if st.session_state.perfil_atual == "Admin":
                     with col_b_exc:
                         if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
-                            conn = sqlite3.connect("banco_vcs.db")
+                            conn = conectar()
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
                             cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
@@ -696,7 +723,7 @@ elif menu == "Consultar Orçamentos":
 # TELA 3: GERENCIAR PRODUTOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
-    st.subheader("📦 Gerenciamento de Produtos")
+    st.subheader(f"📦 Produtos — [{empresa_selecionada}]")
     
     if st.session_state.perfil_atual == "Admin":
         with st.form("cad_prod"):
@@ -710,7 +737,7 @@ elif menu == "Gerenciar Produtos":
             if submit:
                 if descricao and preco > 0:
                     try:
-                        conn = sqlite3.connect("banco_vcs.db")
+                        conn = conectar()
                         cursor = conn.cursor()
                         cursor.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
                         conn.commit()
@@ -719,20 +746,20 @@ elif menu == "Gerenciar Produtos":
                         st.success("Produto cadastrado com sucesso!")
                         st.rerun()
                     except Exception as e:
-                        st.error(f"Erro ao cadastrar (código duplicado?): {e}")
+                        st.error(f"Erro ao cadastrar: {e}")
                 else:
                     st.error("Preencha a descrição e um preço válido.")
         st.markdown("---")
 
-    st.subheader("Lista e Edição de Produtos Cadastrados")
-    conn = sqlite3.connect("banco_vcs.db")
+    st.subheader("Lista de Produtos Cadastrados")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
     prods = cursor.fetchall()
     conn.close()
 
     if not prods:
-        st.info("Nenhum produto cadastrado.")
+        st.info("Nenhum produto cadastrado nesta empresa.")
     else:
         for p in prods:
             p_id, p_cod, p_desc, p_preco, p_cat = p
@@ -751,19 +778,19 @@ elif menu == "Gerenciar Produtos":
                     if salvar_edicao:
                         preco_convertido = converter_para_float(txt_novo_preco)
                         if novo_desc and preco_convertido > 0:
-                            conn = sqlite3.connect("banco_vcs.db")
+                            conn = conectar()
                             cursor = conn.cursor()
                             cursor.execute("UPDATE produtos SET descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_desc, preco_convertido, nova_cat, p_id))
                             conn.commit()
                             conn.close()
-                            registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado para {novo_desc} - {preco_convertido}")
+                            registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado")
                             st.success("Produto atualizado com sucesso!")
                             st.rerun()
                         else:
                             st.error("Preencha uma descrição e um preço válidos.")
 
                     if excluir_prod:
-                        conn = sqlite3.connect("banco_vcs.db")
+                        conn = conectar()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
                         conn.commit()
@@ -776,11 +803,11 @@ elif menu == "Gerenciar Produtos":
 # TELA 4: GERENCIAR CLIENTES
 # ---------------------------------------------------------
 elif menu == "Gerenciar Clientes":
-    st.subheader("👥 Pesquisa e Gerenciamento de Clientes")
+    st.subheader(f"👥 Clientes — [{empresa_selecionada}]")
     
     pesq_cliente = st.text_input("Pesquisar Cliente por Nome ou CPF/CNPJ:")
 
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     
     if pesq_cliente:
@@ -792,7 +819,7 @@ elif menu == "Gerenciar Clientes":
     conn.close()
 
     if not clientes_encontrados:
-        st.info("Nenhum cliente cadastrado.")
+        st.info("Nenhum cliente cadastrado nesta empresa.")
     else:
         for cli in clientes_encontrados:
             c_id, c_nome, c_doc, c_tel, c_end = cli
@@ -815,7 +842,7 @@ elif menu == "Gerenciar Clientes":
                         else:
                             doc_f = formatar_documento(novo_doc.strip())
                             tel_f = formatar_telefone(novo_tel.strip())
-                            conn = sqlite3.connect("banco_vcs.db")
+                            conn = conectar()
                             cursor = conn.cursor()
                             try:
                                 cursor.execute("""
@@ -825,7 +852,7 @@ elif menu == "Gerenciar Clientes":
                                 """, (novo_nome.strip(), doc_f, tel_f, novo_end.strip(), c_id))
                                 conn.commit()
                                 conn.close()
-                                registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado para {novo_nome}")
+                                registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado")
                                 st.success("Dados do cliente atualizados com sucesso!")
                                 st.rerun()
                             except Exception as e:
@@ -833,7 +860,7 @@ elif menu == "Gerenciar Clientes":
                                 st.error(f"Erro ao atualizar: {e}")
 
                     if excluir_cli:
-                        conn = sqlite3.connect("banco_vcs.db")
+                        conn = conectar()
                         cursor = conn.cursor()
                         cursor.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
                         conn.commit()
@@ -846,7 +873,7 @@ elif menu == "Gerenciar Clientes":
 # TELA 5: GERENCIAR USUÁRIOS
 # ---------------------------------------------------------
 elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
-    st.subheader("👤 Gerenciamento de Usuários do Sistema")
+    st.subheader(f"👤 Usuários — [{empresa_selecionada}]")
     
     with st.form("cad_usuario"):
         st.markdown("### Criar Novo Usuário")
@@ -858,12 +885,12 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
         if btn_criar_user:
             if novo_user and nova_senha:
                 try:
-                    conn = sqlite3.connect("banco_vcs.db")
+                    conn = conectar()
                     cursor = conn.cursor()
                     cursor.execute("INSERT INTO usuarios (usuario, senha, perfil) VALUES (?, ?, ?)", (novo_user, hash_senha(nova_senha), novo_perfil))
                     conn.commit()
                     conn.close()
-                    registrar_log(st.session_state.usuario_atual, "CRIAR USUÁRIO", f"Usuário {novo_user} criado com perfil {novo_perfil}")
+                    registrar_log(st.session_state.usuario_atual, "CRIAR USUÁRIO", f"Usuário {novo_user} criado")
                     st.success(f"Usuário '{novo_user}' criado com sucesso!")
                     st.rerun()
                 except:
@@ -872,9 +899,9 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
                 st.error("Preencha o usuário e a senha.")
 
     st.markdown("---")
-    st.subheader("Lista e Edição de Usuários Cadastrados")
+    st.subheader("Lista de Usuários Cadastrados")
     
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT id, usuario, perfil FROM usuarios")
     usuarios_cad = cursor.fetchall()
@@ -898,7 +925,7 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
                     if not edit_nome:
                         st.error("O nome de usuário não pode ficar vazio.")
                     else:
-                        conn = sqlite3.connect("banco_vcs.db")
+                        conn = conectar()
                         cursor = conn.cursor()
                         try:
                             if edit_senha.strip():
@@ -914,10 +941,10 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
                             st.rerun()
                         except:
                             conn.close()
-                            st.error("Erro: Este nome de usuário já está em uso por outro cadastro.")
+                            st.error("Erro: Este nome de usuário já está em uso.")
 
                 if excluir_user:
-                    conn = sqlite3.connect("banco_vcs.db")
+                    conn = conectar()
                     cursor = conn.cursor()
                     cursor.execute("DELETE FROM usuarios WHERE id = ?", (u_id,))
                     conn.commit()
@@ -930,16 +957,16 @@ elif menu == "Gerenciar Usuários" and st.session_state.perfil_atual == "Admin":
 # TELA 6: LOGS DE AUDITORIA
 # ---------------------------------------------------------
 elif menu == "Logs de Auditoria" and st.session_state.perfil_atual == "Admin":
-    st.subheader("📋 Logs de Auditoria (Histórico de Alterações)")
+    st.subheader(f"📋 Logs de Auditoria — [{empresa_selecionada}]")
     
-    conn = sqlite3.connect("banco_vcs.db")
+    conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT usuario, acao, detalhes, data FROM logs ORDER BY id DESC")
     logs = cursor.fetchall()
     conn.close()
 
     if not logs:
-        st.info("Nenhum registro de log encontrado.")
+        st.info("Nenhum registro de log encontrado nesta empresa.")
     else:
         for log in logs:
             usuario, acao, detalhes, data = log
