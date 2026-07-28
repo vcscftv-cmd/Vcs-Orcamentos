@@ -11,7 +11,7 @@ import pandas as pd
 # Configuração da página para ocupar a largura total
 st.set_page_config(page_title="Sistema de Orçamentos e Propostas", page_icon="💻", layout="wide")
 
-# 🏢 BANCOS DE DADOS SEPARADOS APENAS PARA ORÇAMENTOS/LOGS
+# 🏢 BANCOS DE DADOS DAS EMPRESAS (ORÇAMENTOS E LOGS)
 EMPRESAS = {
     "VCS Informática": "vcs_informatica.db",
     "STI TECNOLOGIA": "sti_tecnologia.db",
@@ -151,6 +151,45 @@ def iniciar_banco():
     conn_prod.close()
 
 iniciar_banco()
+
+# Função unificada para carregar produtos de todas as fontes possíveis (Global + Bancos antigos das empresas)
+def carregar_todos_produtos():
+    produtos_dict = {} # Para evitar duplicatas baseado na descrição
+    
+    # 1. Busca no Banco Global
+    try:
+        conn_p = conectar_produtos()
+        cursor_p = conn_p.cursor()
+        cursor_p.execute("SELECT descricao, preco, categoria FROM produtos")
+        for p in cursor_p.fetchall():
+            desc = p[0].strip()
+            produtos_dict[desc.lower()] = (p[0], p[1], p[2])
+        conn_p.close()
+    except:
+        pass
+
+    # 2. Busca nos bancos antigos das empresas para recuperar caso tenham ficado lá
+    for db_emp in EMPRESAS.values():
+        if os.path.exists(db_emp):
+            try:
+                conn_e = sqlite3.connect(db_emp)
+                cursor_e = conn_e.cursor()
+                cursor_e.execute("SELECT descricao, preco, categoria FROM produtos")
+                for p in cursor_e.fetchall():
+                    desc = p[0].strip()
+                    if desc.lower() not in produtos_dict:
+                        produtos_dict[desc.lower()] = (p[0], p[1], p[2])
+                        # Já aproveita e injeta no global para centralizar
+                        conn_gp = conectar_produtos()
+                        cursor_gp = conn_gp.cursor()
+                        cursor_gp.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", ("", p[0], p[1], p[2]))
+                        conn_gp.commit()
+                        conn_gp.close()
+                conn_e.close()
+            except:
+                pass
+                
+    return list(produtos_dict.values())
 
 def registrar_log(usuario, acao, detalhes):
     conn = conectar()
@@ -300,11 +339,7 @@ if menu == "Criar Orçamento / Proposta":
     
     tipo_documento = st.radio("Tipo de Documento", ["Orçamento", "Proposta"], horizontal=True)
 
-    conn_p = conectar_produtos()
-    cursor_p = conn_p.cursor()
-    cursor_p.execute("SELECT descricao, preco, categoria FROM produtos")
-    produtos_db = cursor_p.fetchall()
-    conn_p.close()
+    produtos_db = carregar_todos_produtos()
 
     conn_c = conectar_clientes()
     cursor_c = conn_c.cursor()
@@ -659,7 +694,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 </div>
 
                 <div style="border-top: 1px dashed #aaa; padding-top: 15px; text-align: center; font-size: 12px; color: #777;">
-                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orc_dados[11] else empresa_selecionada}.</p>
+                    <p>Emitido por {orc_dados[11] if len(orc_dados) > 11 and orb_dados[11] else empresa_selecionada}.</p>
                 </div>
             </div>
         </body>
