@@ -37,7 +37,6 @@ def conectar_produtos():
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA INDIVIDUAL POR EMPRESA
 def obter_logo_base64():
-    # Cria um nome de arquivo seguro baseado no nome da empresa selecionada
     nome_limpo = "".join(c if c.isalnum() else "_" for c in empresa_selecionada.lower())
     arquivo_logo_empresa = f"logo_{nome_limpo}.png"
     
@@ -577,7 +576,8 @@ if menu == "Criar Orçamento / Proposta":
         texto_btn_salvar = f"💾 Salvar Alterações do Documento {editando_num}" if editando_num else f"💾 Salvar {tipo_documento}"
 
         if st.button(texto_btn_salvar):
-            if not cliente:
+            cliente_val = st.session_state.form_cliente.strip()
+            if not cliente_val:
                 st.error("Preencha o nome do cliente!")
             else:
                 conn = conectar()
@@ -587,14 +587,12 @@ if menu == "Criar Orçamento / Proposta":
                     num_orc = editando_num
                     data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
                     
-                    # Atualiza o cabeçalho existente
                     cursor.execute("""
                         UPDATE orcamentos 
                         SET cliente = ?, documento = ?, telefone = ?, endereco = ?, garantia = ?, validade = ?, pagamento = ?, data = ?, total = ?
                         WHERE numero_orcamento = ?
-                    """, (cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, num_orc))
+                    """, (cliente_val, st.session_state.form_documento, st.session_state.form_telefone, st.session_state.form_endereco, garantia, validade, pagamento, data_atual, total_geral, num_orc))
                     
-                    # Remove itens antigos para reescrever com o carrinho atualizado
                     cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (num_orc,))
                     
                 else:
@@ -605,7 +603,7 @@ if menu == "Criar Orçamento / Proposta":
                     cursor.execute("""
                         INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por, tipo_documento)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual, tipo_doc_atual))
+                    """, (num_orc, cliente_val, st.session_state.form_documento, st.session_state.form_telefone, st.session_state.form_endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual, tipo_doc_atual))
                 
                 for item in st.session_state.carrinho:
                     cursor.execute("""
@@ -623,7 +621,7 @@ if menu == "Criar Orçamento / Proposta":
                 conn.close()
                 
                 acao_log = f"EDITAR DOCUMENTO" if editando_num else f"CRIAR DOCUMENTO"
-                registrar_log(st.session_state.usuario_atual, acao_log, f"Documento {num_orc} salvo para {cliente} em {empresa_selecionada}")
+                registrar_log(st.session_state.usuario_atual, acao_log, f"Documento {num_orc} salvo para {cliente_val} em {empresa_selecionada}")
                 
                 st.session_state.carrinho = []
                 st.session_state.modo_edicao_orcamento = None
@@ -695,7 +693,6 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                     {tag_logo}
                     <h1>{empresa_selecionada}</h1>
                     <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()} DE SERVIÇOS E PRODUTOS</h3>
-                    <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
                 </div>
                 
                 <div style="margin-bottom: 20px; font-size: 14px;">
@@ -802,14 +799,12 @@ elif menu == "Consultar Documentos":
 
                 with col_b_edit:
                     if st.button(f"✏️ Editar {orc[1]}", key=f"edit_orc_{orc[0]}"):
-                        # Carrega dados do orçamento para a sessão para edição
                         st.session_state.modo_edicao_orcamento = orc[1]
                         st.session_state.form_cliente = orc[2]
                         st.session_state.form_documento = orc[3] or ""
                         st.session_state.form_telefone = orc[4] or ""
                         st.session_state.form_endereco = orc[5] or ""
                         
-                        # Preenche o carrinho com os itens existentes
                         st.session_state.carrinho = []
                         for it in itens:
                             st.session_state.carrinho.append({
