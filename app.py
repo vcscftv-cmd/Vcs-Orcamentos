@@ -389,22 +389,29 @@ if menu == "Criar Orçamento / Proposta":
 
     st.markdown("---")
     
-    # 🛠️ SERVIÇOS (TABELA DINÂMICA)
+    # 🛠️ SERVIÇOS (SIMPLES)
     st.subheader("🛠️ Serviços")
-    st.write("Adicione quantos serviços precisar, informando a descrição, quantidade e o preço unitário.")
-
-    if "df_servicos_state" not in st.session_state:
-        st.session_state.df_servicos_state = pd.DataFrame([
-            {"Descrição do Serviço": "Instalação / Configuração", "Qtd": 1.0, "Preço Unitário (R$)": 0.0}
-        ])
-
-    df_servicos_editado = st.data_editor(
-        st.session_state.df_servicos_state,
-        num_rows="dynamic",
-        use_container_width=True,
-        key="editor_servicos_dinamico"
-    )
-    st.session_state.df_servicos_state = df_servicos_editado
+    incluir_servicos = st.radio("Deseja adicionar serviço?", ["Não", "Sim"], horizontal=True, key="radio_servicos")
+    
+    subtotal_servicos = 0.0
+    lista_servicos_processados = []
+    
+    if incluir_servicos == "Sim":
+        col_s1, col_s2 = st.columns([3, 1])
+        with col_s1:
+            servico_descricao = st.text_input("Descrição do Serviço", value="Instalação / Configuração")
+        with col_s2:
+            servico_valor = st.text_input("Valor do Serviço (R$)", value="0,00")
+            
+        val_s = converter_para_float(servico_valor)
+        if servico_descricao.strip() and val_s > 0:
+            subtotal_servicos = val_s
+            lista_servicos_processados.append({
+                "produto": servico_descricao.strip(),
+                "quantidade": 1,
+                "preco_unitario": val_s,
+                "subtotal": val_s
+            })
 
     st.markdown("---")
     
@@ -463,45 +470,25 @@ if menu == "Criar Orçamento / Proposta":
                             })
                         st.success("Produto adicionado ao carrinho!")
 
-    # Cálculo dos serviços da tabela dinâmica
-    subtotal_servicos = 0.0
-    lista_servicos_processados = []
-    try:
-        for index, row in df_servicos_editado.iterrows():
-            desc_s = str(row.get("Descrição do Serviço", "")).strip()
-            qtd_s = float(row.get("Qtd", 0))
-            preco_s = float(row.get("Preço Unitário (R$)", 0))
-            if desc_s and desc_s != "nan" and qtd_s > 0 and preco_s > 0:
-                sub_s = qtd_s * preco_s
-                subtotal_servicos += sub_s
-                lista_servicos_processados.append({
-                    "produto": desc_s,
-                    "quantidade": int(qtd_s),
-                    "preco_unitario": preco_s,
-                    "subtotal": sub_s
-                })
-    except:
-        pass
+    if st.session_state.carrinho:
+        st.markdown("### Carrinho de Produtos")
+        subtotal_produtos = 0
+        novos_itens = []
+        for i, item in enumerate(st.session_state.carrinho):
+            col_i1, col_i2, col_i3, col_i4 = st.columns([3, 1, 1, 1])
+            col_i1.write(item["produto"])
+            col_i2.write(f"Qtd: {item['quantidade']}")
+            col_i3.write(formatar_moeda(item['subtotal']))
+            subtotal_produtos += item["subtotal"]
+            if not col_i4.button("🗑️", key=f"del_{i}"):
+                novos_itens.append(item)
+        st.session_state.carrinho = novos_itens
+    else:
+        subtotal_produtos = 0.0
 
-    if st.session_state.carrinho or subtotal_servicos > 0:
-        if st.session_state.carrinho:
-            st.markdown("### Carrinho de Produtos")
-            subtotal_produtos = 0
-            novos_itens = []
-            for i, item in enumerate(st.session_state.carrinho):
-                col_i1, col_i2, col_i3, col_i4 = st.columns([3, 1, 1, 1])
-                col_i1.write(item["produto"])
-                col_i2.write(f"Qtd: {item['quantidade']}")
-                col_i3.write(formatar_moeda(item['subtotal']))
-                subtotal_produtos += item["subtotal"]
-                if not col_i4.button("🗑️", key=f"del_{i}"):
-                    novos_itens.append(item)
-            st.session_state.carrinho = novos_itens
-        else:
-            subtotal_produtos = 0.0
+    subtotal_geral = subtotal_produtos + subtotal_servicos
 
-        subtotal_geral = subtotal_produtos + subtotal_servicos
-
+    if subtotal_geral > 0:
         col_desc1, col_desc2 = st.columns([2, 2])
         with col_desc1:
             tipo_desconto = st.selectbox("Tipo de Desconto", ["Nenhum", "Valor (R$)", "Porcentagem (%)"])
@@ -594,7 +581,6 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         logo_b64 = obter_logo_base64()
         tag_logo = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 80px; margin-bottom: 10px;" />' if logo_b64 else ''
         
-        # Identifica se é Proposta ou Orçamento baseado no banco
         tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORÇAMENTO"
 
         html_orcamento = f"""
