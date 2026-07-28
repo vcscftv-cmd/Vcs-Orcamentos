@@ -9,21 +9,31 @@ import os
 import pandas as pd
 
 # Configuração da página para ocupar a largura total
-st.set_page_config(page_title="Sistema de Orçamentos", page_icon="💻", layout="wide")
+st.set_page_config(page_title="Sistema de Orçamentos e Propostas", page_icon="💻", layout="wide")
 
-# 🏢 DICIONÁRIO DE EMPRESAS E SEUS BANCOS DE DADOS SEPARADOS
+# 🏢 BANCOS DE DADOS SEPARADOS APENAS PARA ORÇAMENTOS/LOGS
 EMPRESAS = {
     "VCS Informática": "vcs_informatica.db",
     "STI TECNOLOGIA": "sti_tecnologia.db",
     "VORTICE GRAFTENG": "vortice_grafteng.db"
 }
 
+# 🌍 BANCOS GLOBAIS (COMPARTILHADOS PARA CLIENTES E PRODUTOS)
+DB_CLIENTES_GLOBAL = "clientes_global.db"
+DB_PRODUTOS_GLOBAL = "produtos_global.db"
+
 st.sidebar.title("🏢 Seleção de Empresa")
-empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa:", list(EMPRESAS.keys()))
+empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa Atual:", list(EMPRESAS.keys()))
 DB_ARQUIVO = EMPRESAS[empresa_selecionada]
 
 def conectar():
     return sqlite3.connect(DB_ARQUIVO)
+
+def conectar_clientes():
+    return sqlite3.connect(DB_CLIENTES_GLOBAL)
+
+def conectar_produtos():
+    return sqlite3.connect(DB_PRODUTOS_GLOBAL)
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA
 ARQUIVO_LOGO = "logo.png" 
@@ -38,6 +48,7 @@ def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
 def iniciar_banco():
+    # Banco da Empresa (Orçamentos, Logs, Usuários)
     conn = conectar()
     cursor = conn.cursor()
     
@@ -57,26 +68,6 @@ def iniciar_banco():
         acao TEXT NOT NULL,
         detalhes TEXT NOT NULL,
         data TEXT NOT NULL
-    )
-    """)
-    
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS clientes (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        nome TEXT NOT NULL,
-        documento TEXT,
-        telefone TEXT,
-        endereco TEXT
-    )
-    """)
-    
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS produtos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo TEXT,
-        descricao TEXT NOT NULL,
-        preco REAL NOT NULL,
-        categoria TEXT NOT NULL
     )
     """)
     
@@ -129,6 +120,36 @@ def iniciar_banco():
         
     conn.close()
 
+    # Banco Global de Clientes
+    conn_cli = conectar_clientes()
+    cursor_cli = conn_cli.cursor()
+    cursor_cli.execute("""
+    CREATE TABLE IF NOT EXISTS clientes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        nome TEXT NOT NULL,
+        documento TEXT,
+        telefone TEXT,
+        endereco TEXT
+    )
+    """)
+    conn_cli.commit()
+    conn_cli.close()
+
+    # Banco Global de Produtos
+    conn_prod = conectar_produtos()
+    cursor_prod = conn_prod.cursor()
+    cursor_prod.execute("""
+    CREATE TABLE IF NOT EXISTS produtos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo TEXT,
+        descricao TEXT NOT NULL,
+        preco REAL NOT NULL,
+        categoria TEXT NOT NULL
+    )
+    """)
+    conn_prod.commit()
+    conn_prod.close()
+
 iniciar_banco()
 
 def registrar_log(usuario, acao, detalhes):
@@ -180,8 +201,7 @@ def gerar_numero_documento(tipo_doc):
     conn.close()
     
     proximo_id = qtd + 1
-    prefixo = "Proposta" if tipo_doc == "Proposta" else "Orcamento"
-    return f"{prefixo}_{proximo_id:03d}"
+    return f"{proximo_id:03d}"
 
 def converter_para_float(texto_valor):
     try:
@@ -222,7 +242,7 @@ if st.session_state.autenticado:
         st.session_state.autenticado = False
         st.session_state.usuario_atual = ""
         st.session_state.perfil_atual = ""
-        st.warning("⚠️ Sessão expirada por inatividade (mais de 10 minutos sem uso). Faça login novamente.")
+        st.warning("⚠️ Sessão expirada por inatividade. Faça login novamente.")
         st.rerun()
     else:
         st.session_state.ultimo_acesso = time.time()
@@ -280,14 +300,17 @@ if menu == "Criar Orçamento / Proposta":
     
     tipo_documento = st.radio("Tipo de Documento", ["Orçamento", "Proposta"], horizontal=True)
 
-    conn = conectar()
-    cursor = conn.cursor()
-    cursor.execute("SELECT descricao, preco, categoria FROM produtos")
-    produtos_db = cursor.fetchall()
-    
-    cursor.execute("SELECT nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
-    clientes_cadastrados = cursor.fetchall()
-    conn.close()
+    conn_p = conectar_produtos()
+    cursor_p = conn_p.cursor()
+    cursor_p.execute("SELECT descricao, preco, categoria FROM produtos")
+    produtos_db = cursor_p.fetchall()
+    conn_p.close()
+
+    conn_c = conectar_clientes()
+    cursor_c = conn_c.cursor()
+    cursor_c.execute("SELECT nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
+    clientes_cadastrados = cursor_c.fetchall()
+    conn_c.close()
 
     dict_clientes = {}
     for c in clientes_cadastrados:
@@ -348,25 +371,25 @@ if menu == "Criar Orçamento / Proposta":
                 st.session_state.form_telefone = tel_formatado
                 st.session_state.form_endereco = endereco.strip()
                 
-                conn = conectar()
-                cursor = conn.cursor()
-                cursor.execute("SELECT id FROM clientes WHERE nome = ?", (cliente.strip(),))
-                cliente_existe = cursor.fetchone()
+                conn_c = conectar_clientes()
+                cursor_c = conn_c.cursor()
+                cursor_c.execute("SELECT id FROM clientes WHERE nome = ?", (cliente.strip(),))
+                cliente_existe = cursor_c.fetchone()
                 
                 if cliente_existe:
-                    cursor.execute("""
+                    cursor_c.execute("""
                         UPDATE clientes 
                         SET documento = ?, telefone = ?, endereco = ? 
                         WHERE nome = ?
                     """, (doc_formatado, tel_formatado, endereco.strip(), cliente.strip()))
                 else:
-                    cursor.execute("""
+                    cursor_c.execute("""
                         INSERT INTO clientes (nome, documento, telefone, endereco)
                         VALUES (?, ?, ?, ?)
                     """, (cliente.strip(), doc_formatado, tel_formatado, endereco.strip()))
                 
-                conn.commit()
-                conn.close()
+                conn_c.commit()
+                conn_c.close()
                 
                 st.success("Dados do cliente salvos e fixados com sucesso!")
                 st.rerun()
@@ -375,7 +398,7 @@ if menu == "Criar Orçamento / Proposta":
 
     st.markdown("---")
     
-    # 🛠️ SERVIÇOS (SIMPLES)
+    # 🛠️ SERVIÇOS
     st.subheader("🛠️ Serviços")
     incluir_servicos = st.radio("Deseja adicionar serviço?", ["Não", "Sim"], horizontal=True, key="radio_servicos")
     
@@ -670,7 +693,7 @@ elif menu == "Consultar Documentos":
     else:
         for orc in orcamentos:
             tipo_doc_reg = orc[12] if len(orc) > 12 and orc[12] else "Orçamento"
-            with st.expander(f"[{tipo_doc_reg}] {orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
+            with st.expander(f"[{tipo_doc_reg}] Nº {orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
                 st.write(f"**Tipo:** {tipo_doc_reg}")
                 st.write(f"**CPF/CNPJ:** {orc[3]}")
                 st.write(f"**Telefone:** {orc[4]}")
@@ -710,10 +733,10 @@ elif menu == "Consultar Documentos":
                             st.rerun()
 
 # ---------------------------------------------------------
-# TELA 3: GERENCIAR PRODUTOS
+# TELA 3: GERENCIAR PRODUTOS (GLOBAL)
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
-    st.subheader(f"📦 Produtos — [{empresa_selecionada}]")
+    st.subheader("📦 Produtos (Global para todas as empresas)")
     
     if st.session_state.perfil_atual == "Admin":
         with st.form("cad_prod"):
@@ -727,11 +750,11 @@ elif menu == "Gerenciar Produtos":
             if submit:
                 if descricao and preco > 0:
                     try:
-                        conn = conectar()
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
-                        conn.commit()
-                        conn.close()
+                        conn_p = conectar_produtos()
+                        cursor_p = conn_p.cursor()
+                        cursor_p.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
+                        conn_p.commit()
+                        conn_p.close()
                         registrar_log(st.session_state.usuario_atual, "CRIAR PRODUTO", f"Produto {descricao} cadastrado")
                         st.success("Produto cadastrado com sucesso!")
                         st.rerun()
@@ -742,14 +765,14 @@ elif menu == "Gerenciar Produtos":
         st.markdown("---")
 
     st.subheader("Lista de Produtos Cadastrados")
-    conn = conectar()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
-    prods = cursor.fetchall()
-    conn.close()
+    conn_p = conectar_produtos()
+    cursor_p = conn_p.cursor()
+    cursor_p.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
+    prods = cursor_p.fetchall()
+    conn_p.close()
 
     if not prods:
-        st.info("Nenhum produto cadastrado nesta empresa.")
+        st.info("Nenhum produto cadastrado.")
     else:
         for p in prods:
             p_id, p_cod, p_desc, p_preco, p_cat = p
@@ -769,11 +792,11 @@ elif menu == "Gerenciar Produtos":
                     if salvar_edicao:
                         preco_convertido = converter_para_float(txt_novo_preco)
                         if novo_desc and preco_convertido > 0:
-                            conn = conectar()
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE produtos SET codigo = ?, descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_cod, novo_desc, preco_convertido, nova_cat, p_id))
-                            conn.commit()
-                            conn.close()
+                            conn_p = conectar_produtos()
+                            cursor_p = conn_p.cursor()
+                            cursor_p.execute("UPDATE produtos SET codigo = ?, descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_cod, novo_desc, preco_convertido, nova_cat, p_id))
+                            conn_p.commit()
+                            conn_p.close()
                             registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado")
                             st.success("Produto atualizado com sucesso!")
                             st.rerun()
@@ -781,36 +804,36 @@ elif menu == "Gerenciar Produtos":
                             st.error("Preencha uma descrição e um preço válidos.")
 
                     if excluir_prod:
-                        conn = conectar()
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
-                        conn.commit()
-                        conn.close()
+                        conn_p = conectar_produtos()
+                        cursor_p = conn_p.cursor()
+                        cursor_p.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
+                        conn_p.commit()
+                        conn_p.close()
                         registrar_log(st.session_state.usuario_atual, "EXCLUIR PRODUTO", f"Produto {p_desc} excluído")
                         st.success("Produto excluído com sucesso!")
                         st.rerun()
 
 # ---------------------------------------------------------
-# TELA 4: GERENCIAR CLIENTES
+# TELA 4: GERENCIAR CLIENTES (GLOBAL)
 # ---------------------------------------------------------
 elif menu == "Gerenciar Clientes":
-    st.subheader(f"👥 Clientes — [{empresa_selecionada}]")
+    st.subheader("👥 Clientes (Global para todas as empresas)")
     
     pesq_cliente = st.text_input("Pesquisar Cliente por Nome ou CPF/CNPJ:")
 
-    conn = conectar()
-    cursor = conn.cursor()
+    conn_c = conectar_clientes()
+    cursor_c = conn_c.cursor()
     
     if pesq_cliente:
-        cursor.execute("SELECT id, nome, documento, telefone, endereco FROM clientes WHERE nome LIKE ? OR documento LIKE ?", (f"%{pesq_cliente}%", f"%{pesq_cliente}%"))
+        cursor_c.execute("SELECT id, nome, documento, telefone, endereco FROM clientes WHERE nome LIKE ? OR documento LIKE ?", (f"%{pesq_cliente}%", f"%{pesq_cliente}%"))
     else:
-        cursor.execute("SELECT id, nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
+        cursor_c.execute("SELECT id, nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
         
-    clientes_encontrados = cursor.fetchall()
-    conn.close()
+    clientes_encontrados = cursor_c.fetchall()
+    conn_c.close()
 
     if not clientes_encontrados:
-        st.info("Nenhum cliente cadastrado nesta empresa.")
+        st.info("Nenhum cliente cadastrado.")
     else:
         for cli in clientes_encontrados:
             c_id, c_nome, c_doc, c_tel, c_end = cli
@@ -833,29 +856,29 @@ elif menu == "Gerenciar Clientes":
                         else:
                             doc_f = formatar_documento(novo_doc.strip())
                             tel_f = formatar_telefone(novo_tel.strip())
-                            conn = conectar()
-                            cursor = conn.cursor()
+                            conn_c = conectar_clientes()
+                            cursor_c = conn_c.cursor()
                             try:
-                                cursor.execute("""
+                                cursor_c.execute("""
                                     UPDATE clientes 
                                     SET nome = ?, documento = ?, telefone = ?, endereco = ? 
                                     WHERE id = ?
                                 """, (novo_nome.strip(), doc_f, tel_f, novo_end.strip(), c_id))
-                                conn.commit()
-                                conn.close()
+                                conn_c.commit()
+                                conn_c.close()
                                 registrar_log(st.session_state.usuario_atual, "EDITAR CLIENTE", f"Cliente {c_nome} atualizado")
                                 st.success("Dados do cliente atualizados com sucesso!")
                                 st.rerun()
                             except Exception as e:
-                                conn.close()
+                                conn_c.close()
                                 st.error(f"Erro ao atualizar: {e}")
 
                     if excluir_cli:
-                        conn = conectar()
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
-                        conn.commit()
-                        conn.close()
+                        conn_c = conectar_clientes()
+                        cursor_c = conn_c.cursor()
+                        cursor_c.execute("DELETE FROM clientes WHERE id = ?", (c_id,))
+                        conn_c.commit()
+                        conn_c.close()
                         registrar_log(st.session_state.usuario_atual, "EXCLUIR CLIENTE", f"Cliente {c_nome} excluído")
                         st.success("Cliente excluído com sucesso!")
                         st.rerun()
