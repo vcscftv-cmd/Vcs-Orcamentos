@@ -591,7 +591,6 @@ if menu == "Criar Orçamento / Proposta":
                 conn = conectar()
                 cursor = conn.cursor()
                 
-                # HORÁRIO CORRIGIDO AO SALVAR ORÇAMENTO
                 fuso_br = datetime.timezone(datetime.timedelta(hours=-3))
                 data_atual = datetime.datetime.now(fuso_br).strftime("%d/%m/%Y %H:%M")
                 
@@ -672,7 +671,6 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         
         tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORCAMENTO"
         
-        # Tratamento do nome do cliente para formatar o PDF de acordo com o padrão ORC_NOMEDOCLIENTE
         nome_cliente_limpo = "".join(c if c.isalnum() else "_" for c in str(orc_dados[2]).strip())
         nome_arquivo_pdf = f"ORC_{nome_cliente_limpo}"
 
@@ -800,7 +798,7 @@ elif menu == "Consultar Documentos":
                 st.write(f"**Endereço:** {orc[5]}")
                 st.write(f"**Garantia:** {orc[6]} | **Validade:** {orc[7]} | **Pagamento:** {orc[8]}")
                 
-                criado_por_val = orc[11] if len(orc) > 11 and oracle_val := orc[11] else 'Não registrado'
+                criado_por_val = orc[11] if len(orc) > 11 and orc[11] else 'Não registrado'
                 st.write(f"**Criado por:** {criado_por_val}")
                 
                 conn = conectar()
