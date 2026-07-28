@@ -279,6 +279,7 @@ def formatar_moeda(valor):
 
 TEMPO_INATIVIDADE_MAX = 600 
 
+# Inicialização segura do session_state
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_atual" not in st.session_state:
@@ -291,39 +292,6 @@ if "ultimo_orcamento_imprimir" not in st.session_state:
     st.session_state.ultimo_orcamento_imprimir = None
 if "modo_edicao_orcamento" not in st.session_state:
     st.session_state.modo_edicao_orcamento = None
-
-# Função JS embutida para gerenciar persistência por cookies nativos
-st.markdown("""
-<script>
-function setCookie(name, value, days) {
-    let expires = "";
-    if (days) {
-        let date = new Date();
-        date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-        expires = "; expires=" + date.toUTCString();
-    }
-    document.cookie = name + "=" + (value || "") + expires + "; path=/";
-}
-function getCookie(name) {
-    let nameEQ = name + "=";
-    let ca = document.cookie.split(';');
-    for(let i=0; i < ca.length; i++) {
-        let c = ca[i];
-        while (c.charAt(0)==' ') c = c.substring(1,c.length);
-        if (c.indexOf(nameEQ) == 0) return c.substring(nameEQ.length,c.length);
-    }
-    return null;
-}
-function eraseCookie(name) {   
-    document.cookie = name+'=; Max-Age=-99999999; path=/';
-}
-</script>
-""", unsafe_allow_html=True)
-
-# Verificação de login automático via query_params / session persistente
-if not st.session_state.autenticado:
-    # Tenta resgatar parâmetro interno ou simular persistência via session_state reidratado
-    pass
 
 if st.session_state.autenticado:
     tempo_atual = time.time()
@@ -343,7 +311,6 @@ if not st.session_state.autenticado:
     with st.form("form_login"):
         user_input = st.text_input("Usuário")
         senha_input = st.text_input("Senha", type="password")
-        lembrar_computador = st.checkbox("Lembrar este computador (Manter conectado)")
         btn_login = st.form_submit_button("Entrar")
         
         if btn_login:
@@ -358,17 +325,6 @@ if not st.session_state.autenticado:
                 st.session_state.usuario_atual = user_input
                 st.session_state.perfil_atual = res[0]
                 st.session_state.ultimo_acesso = time.time()
-                
-                if lembrar_computador:
-                    # Injeta script para salvar o cookie de login por 30 dias no navegador
-                    st.components.v1.html(f"""
-                        <script>
-                            let date = new Date();
-                            date.setTime(date.getTime() + (30 * 24 * 60 * 60 * 1000));
-                            document.cookie = "vcs_usuario_salvo={user_input}; expires=" + date.toUTCString() + "; path=/";
-                            window.parent.location.reload();
-                        </script>
-                    """, height=0)
                 
                 registrar_log(user_input, "LOGIN", f"Usuário entrou no sistema ({empresa_selecionada})")
                 st.success("Login realizado com sucesso!")
@@ -391,13 +347,6 @@ menu = st.sidebar.radio("Navegação", opcoes_menu)
 
 if st.sidebar.button("🚪 Sair do Sistema"):
     registrar_log(st.session_state.usuario_atual, "LOGOUT", "Usuário saiu do sistema manualmente")
-    # Limpa o cookie pelo navegador via componente HTML invisível
-    st.components.v1.html("""
-        <script>
-            document.cookie = "vcs_usuario_salvo=; Max-Age=-99999999; path=/";
-            window.parent.location.reload();
-        </script>
-    """, height=0)
     st.session_state.autenticado = False
     st.session_state.usuario_atual = ""
     st.session_state.perfil_atual = ""
