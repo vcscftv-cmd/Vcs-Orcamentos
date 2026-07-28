@@ -692,7 +692,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 <div class="header">
                     {tag_logo}
                     <h1>{empresa_selecionada}</h1>
-                    <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()} DE SERVIÇOS E PRODUTOS</h3>
+                    <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()}</h3>
                 </div>
                 
                 <div style="margin-bottom: 20px; font-size: 14px;">
