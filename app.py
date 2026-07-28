@@ -18,12 +18,18 @@ EMPRESAS = {
     "VORTICE GRAFTENG": "vortice_grafteng.db"
 }
 
+# 📦 BANCO DE DADOS GLOBAL DE PRODUTOS (COMPARTILHADO)
+DB_PRODUTOS_GLOBAL = "produtos_global.db"
+
 st.sidebar.title("🏢 Seleção de Empresa")
 empresa_selecionada = st.sidebar.selectbox("Escolha a Empresa Atual:", list(EMPRESAS.keys()))
 DB_ARQUIVO = EMPRESAS[empresa_selecionada]
 
 def conectar():
     return sqlite3.connect(DB_ARQUIVO)
+
+def conectar_produtos():
+    return sqlite3.connect(DB_PRODUTOS_GLOBAL)
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA
 ARQUIVO_LOGO = "logo.png" 
@@ -38,6 +44,7 @@ def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
 def iniciar_banco():
+    # Inicializa banco da empresa
     conn = conectar()
     cursor = conn.cursor()
     
@@ -57,16 +64,6 @@ def iniciar_banco():
         acao TEXT NOT NULL,
         detalhes TEXT NOT NULL,
         data TEXT NOT NULL
-    )
-    """)
-    
-    cursor.execute("""
-    CREATE TABLE IF NOT EXISTS produtos (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        codigo TEXT UNIQUE,
-        descricao TEXT NOT NULL,
-        preco REAL NOT NULL,
-        categoria TEXT NOT NULL
     )
     """)
     
@@ -121,6 +118,21 @@ def iniciar_banco():
         conn.commit()
         
     conn.close()
+
+    # Inicializa banco global de produtos
+    conn_prod = conectar_produtos()
+    cursor_prod = conn_prod.cursor()
+    cursor_prod.execute("""
+    CREATE TABLE IF NOT EXISTS produtos (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        codigo TEXT UNIQUE,
+        descricao TEXT NOT NULL,
+        preco REAL NOT NULL,
+        categoria TEXT NOT NULL
+    )
+    """)
+    conn_prod.commit()
+    conn_prod.close()
 
 iniciar_banco()
 
@@ -248,7 +260,7 @@ if not st.session_state.autenticado:
 
 st.sidebar.markdown("---")
 st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual})")
-st.sidebar.info(f"📁 Banco Ativo: **{empresa_selecionada}**")
+st.sidebar.info(f"📁 Empresa Ativa: **{empresa_selecionada}**\n📦 Produtos: **Compartilhados**")
 
 opcoes_menu = ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"]
 
@@ -270,11 +282,14 @@ if st.sidebar.button("🚪 Sair do Sistema"):
 if menu == "Criar Orçamento":
     st.subheader(f"📝 Novo Orçamento — [{empresa_selecionada}]")
     
+    conn_prod = conectar_produtos()
+    cursor_prod = conn_prod.cursor()
+    cursor_prod.execute("SELECT descricao, preco, categoria FROM produtos")
+    produtos_db = cursor_prod.fetchall()
+    conn_prod.close()
+    
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute("SELECT descricao, preco, categoria FROM produtos")
-    produtos_db = cursor.fetchall()
-    
     cursor.execute("SELECT nome, documento, telefone, endereco FROM clientes ORDER BY nome ASC")
     clientes_cadastrados = cursor.fetchall()
     conn.close()
@@ -720,14 +735,14 @@ elif menu == "Consultar Orçamentos":
                             st.rerun()
 
 # ---------------------------------------------------------
-# TELA 3: GERENCIAR PRODUTOS
+# TELA 3: GERENCIAR PRODUTOS (COMPARTILHADO)
 # ---------------------------------------------------------
 elif menu == "Gerenciar Produtos":
-    st.subheader(f"📦 Produtos — [{empresa_selecionada}]")
+    st.subheader("📦 Produtos (Catálogo Global Compartilhado)")
     
     if st.session_state.perfil_atual == "Admin":
         with st.form("cad_prod"):
-            st.markdown("### Cadastrar Novo Produto")
+            st.markdown("### Cadastrar Novo Produto Global")
             codigo = st.text_input("Código do Produto")
             descricao = st.text_input("Descrição do Produto")
             preco = st.number_input("Preço (R$)", min_value=0.0, format="%.2f")
@@ -737,13 +752,13 @@ elif menu == "Gerenciar Produtos":
             if submit:
                 if descricao and preco > 0:
                     try:
-                        conn = conectar()
-                        cursor = conn.cursor()
-                        cursor.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
-                        conn.commit()
-                        conn.close()
-                        registrar_log(st.session_state.usuario_atual, "CRIAR PRODUTO", f"Produto {descricao} cadastrado")
-                        st.success("Produto cadastrado com sucesso!")
+                        conn_prod = conectar_produtos()
+                        cursor_prod = conn_prod.cursor()
+                        cursor_prod.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo, descricao, preco, categoria))
+                        conn_prod.commit()
+                        conn_prod.close()
+                        registrar_log(st.session_state.usuario_atual, "CRIAR PRODUTO", f"Produto {descricao} cadastrado globalmente")
+                        st.success("Produto cadastrado com sucesso no catálogo global!")
                         st.rerun()
                     except Exception as e:
                         st.error(f"Erro ao cadastrar: {e}")
@@ -751,15 +766,15 @@ elif menu == "Gerenciar Produtos":
                     st.error("Preencha a descrição e um preço válido.")
         st.markdown("---")
 
-    st.subheader("Lista de Produtos Cadastrados")
-    conn = conectar()
-    cursor = conn.cursor()
-    cursor.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
-    prods = cursor.fetchall()
-    conn.close()
+    st.subheader("Lista de Produtos do Catálogo Global")
+    conn_prod = conectar_produtos()
+    cursor_prod = conn_prod.cursor()
+    cursor_prod.execute("SELECT id, codigo, descricao, preco, categoria FROM produtos")
+    prods = cursor_prod.fetchall()
+    conn_prod.close()
 
     if not prods:
-        st.info("Nenhum produto cadastrado nesta empresa.")
+        st.info("Nenhum produto cadastrado no catálogo global.")
     else:
         for p in prods:
             p_id, p_cod, p_desc, p_preco, p_cat = p
@@ -778,24 +793,24 @@ elif menu == "Gerenciar Produtos":
                     if salvar_edicao:
                         preco_convertido = converter_para_float(txt_novo_preco)
                         if novo_desc and preco_convertido > 0:
-                            conn = conectar()
-                            cursor = conn.cursor()
-                            cursor.execute("UPDATE produtos SET descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_desc, preco_convertido, nova_cat, p_id))
-                            conn.commit()
-                            conn.close()
-                            registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado")
+                            conn_prod = conectar_produtos()
+                            cursor_prod = conn_prod.cursor()
+                            cursor_prod.execute("UPDATE produtos SET descricao = ?, preco = ?, categoria = ? WHERE id = ?", (novo_desc, preco_convertido, nova_cat, p_id))
+                            conn_prod.commit()
+                            conn_prod.close()
+                            registrar_log(st.session_state.usuario_atual, "EDITAR PRODUTO", f"Produto ID {p_id} alterado globalmente")
                             st.success("Produto atualizado com sucesso!")
                             st.rerun()
                         else:
                             st.error("Preencha uma descrição e um preço válidos.")
 
                     if excluir_prod:
-                        conn = conectar()
-                        cursor = conn.cursor()
-                        cursor.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
-                        conn.commit()
-                        conn.close()
-                        registrar_log(st.session_state.usuario_atual, "EXCLUIR PRODUTO", f"Produto {p_desc} excluído")
+                        conn_prod = conectar_produtos()
+                        cursor_prod = conn_prod.cursor()
+                        cursor_prod.execute("DELETE FROM produtos WHERE id = ?", (p_id,))
+                        conn_prod.commit()
+                        conn_prod.close()
+                        registrar_log(st.session_state.usuario_atual, "EXCLUIR PRODUTO", f"Produto {p_desc} excluído globalmente")
                         st.success("Produto excluído com sucesso!")
                         st.rerun()
 
