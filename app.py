@@ -36,14 +36,18 @@ def conectar_produtos():
     return sqlite3.connect(DB_PRODUTOS_GLOBAL)
 
 # ⚙️ CONFIGURAÇÃO DA LOGOMARCA INDIVIDUAL POR EMPRESA
-def obter_logo_base64():
-    nome_limpo = "".join(c if c.isalnum() else "_" for c in empresa_selecionada.lower())
+@st.cache_data(show_spinner=False)
+def obter_logo_base64_cached(empresa):
+    nome_limpo = "".join(c if c.isalnum() else "_" for c in empresa.lower())
     arquivo_logo_empresa = f"logo_{nome_limpo}.png"
     
     if os.path.exists(arquivo_logo_empresa):
         with open(arquivo_logo_empresa, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
     return None
+
+def obter_logo_base64():
+    return obter_logo_base64_cached(empresa_selecionada)
 
 def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
@@ -643,7 +647,7 @@ if menu == "Criar Orçamento / Proposta":
             st.rerun()
 
 # ---------------------------------------------------------
-# TELA DE IMPRESSÃO / PDF
+# TELA DE IMPRESSÃO / PDF COM NOME DO CLIENTE NO TÍTULO
 # ---------------------------------------------------------
 if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
     num_alvo = st.session_state.modo_impressao
@@ -667,13 +671,17 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         tag_logo = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 80px; margin-bottom: 10px;" />' if logo_b64 else ''
         
         tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORCAMENTO"
+        
+        # Tratamento do nome do cliente para formatar o PDF de acordo com o padrão ORC_NOMEDOCLIENTE
+        nome_cliente_limpo = "".join(c if c.isalnum() else "_" for c in str(orc_dados[2]).strip())
+        nome_arquivo_pdf = f"ORC_{nome_cliente_limpo}"
 
         html_orcamento = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>{tipo_doc_salvo} {orc_dados[1]}</title>
+            <title>{nome_arquivo_pdf}</title>
             <style>
                 body {{ background-color: #f8f9fa; font-family: Arial, sans-serif; padding: 20px; }}
                 .sheet {{ background: white; color: black; padding: 40px; border: 1px solid #ddd; border-radius: 8px; max-width: 800px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }}
@@ -690,10 +698,18 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                     .btn-print {{ display: none; }}
                 }}
             </style>
+            <script>
+                function imprimirPdf() {{
+                    var nomeDoc = "{nome_arquivo_pdf}";
+                    document.title = nomeDoc;
+                    try {{ window.top.document.title = nomeDoc; }} catch(e) {{}}
+                    window.print();
+                }}
+            </script>
         </head>
         <body>
             <div class="sheet">
-                <button class="btn-print" onclick="window.print()">🖨️ Imprimir / Salvar em PDF</button>
+                <button class="btn-print" onclick="imprimirPdf()">🖨️ Imprimir / Salvar em PDF</button>
                 
                 <div class="header">
                     {tag_logo}
@@ -784,7 +800,7 @@ elif menu == "Consultar Documentos":
                 st.write(f"**Endereço:** {orc[5]}")
                 st.write(f"**Garantia:** {orc[6]} | **Validade:** {orc[7]} | **Pagamento:** {orc[8]}")
                 
-                criado_por_val = orc[11] if len(orc) > 11 and orc[11] else 'Não registrado'
+                criado_por_val = orc[11] if len(orc) > 11 and oracle_val := orc[11] else 'Não registrado'
                 st.write(f"**Criado por:** {criado_por_val}")
                 
                 conn = conectar()
