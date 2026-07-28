@@ -9,7 +9,7 @@ import os
 import pandas as pd
 
 # Configuração da página para ocupar a largura total
-st.set_page_config(page_title="Sistema de Orçamentos", page_icon="💻", layout="wide")
+st.set_page_config(page_title="Sistema de Orçamentos e Propostas", page_icon="💻", layout="wide")
 
 # 🏢 DICIONÁRIO DE EMPRESAS E SEUS BANCOS DE DADOS SEPARADOS
 EMPRESAS = {
@@ -44,7 +44,6 @@ def hash_senha(senha):
     return hashlib.sha256(str(senha).encode()).hexdigest()
 
 def iniciar_banco():
-    # Inicializa banco da empresa
     conn = conectar()
     cursor = conn.cursor()
     
@@ -90,7 +89,8 @@ def iniciar_banco():
         pagamento TEXT,
         data TEXT NOT NULL,
         total REAL NOT NULL,
-        criado_por TEXT
+        criado_por TEXT,
+        tipo_documento TEXT DEFAULT 'Orçamento'
     )
     """)
     
@@ -111,6 +111,12 @@ def iniciar_banco():
     except:
         pass
 
+    try:
+        cursor.execute("ALTER TABLE orcamentos ADD COLUMN tipo_documento TEXT DEFAULT 'Orçamento'")
+        conn.commit()
+    except:
+        pass
+
     cursor.execute("SELECT COUNT(*) FROM usuarios")
     if cursor.fetchone()[0] == 0:
         senha_padrao = hash_senha("samu@2707")
@@ -119,7 +125,6 @@ def iniciar_banco():
         
     conn.close()
 
-    # Inicializa banco global de produtos
     conn_prod = conectar_produtos()
     cursor_prod = conn_prod.cursor()
     cursor_prod.execute("""
@@ -177,7 +182,7 @@ def formatar_telefone(tel):
         return f"{digitos[:2]} {digitos[2:6]}-{digitos[6:]}"
     return tel
 
-def gerar_numero_orcamento():
+def gerar_numero_documento(tipo_doc):
     conn = conectar()
     cursor = conn.cursor()
     cursor.execute("SELECT COUNT(*) FROM orcamentos")
@@ -185,7 +190,8 @@ def gerar_numero_orcamento():
     conn.close()
     
     proximo_id = qtd + 1
-    return f"Orcamento_{proximo_id:03d}"
+    prefixo = "Proposta" if tipo_doc == "Proposta" else "Orcamento"
+    return f"{prefixo}_{proximo_id:03d}"
 
 def converter_para_float(texto_valor):
     try:
@@ -262,7 +268,7 @@ st.sidebar.markdown("---")
 st.sidebar.write(f"👤 Logado como: **{st.session_state.usuario_atual}** ({st.session_state.perfil_atual})")
 st.sidebar.info(f"📁 Empresa Ativa: **{empresa_selecionada}**\n📦 Produtos: **Compartilhados**")
 
-opcoes_menu = ["Criar Orçamento", "Consultar Orçamentos", "Gerenciar Produtos", "Gerenciar Clientes"]
+opcoes_menu = ["Criar Orçamento / Proposta", "Consultar Documentos", "Gerenciar Produtos", "Gerenciar Clientes"]
 
 if st.session_state.perfil_atual == "Admin":
     opcoes_menu.extend(["Gerenciar Usuários", "Logs de Auditoria"])
@@ -277,11 +283,14 @@ if st.sidebar.button("🚪 Sair do Sistema"):
     st.rerun()
 
 # ---------------------------------------------------------
-# TELA 1: CRIAR ORÇAMENTO
+# TELA 1: CRIAR ORÇAMENTO / PROPOSTA
 # ---------------------------------------------------------
-if menu == "Criar Orçamento":
-    st.subheader(f"📝 Novo Orçamento — [{empresa_selecionada}]")
+if menu == "Criar Orçamento / Proposta":
+    st.subheader(f"📝 Novo Documento — [{empresa_selecionada}]")
     
+    # 📄 ESCOLHA DO TIPO DE DOCUMENTO
+    tipo_documento = st.radio("Tipo de Documento", ["Orçamento", "Proposta"], horizontal=True)
+
     conn_prod = conectar_produtos()
     cursor_prod = conn_prod.cursor()
     cursor_prod.execute("SELECT descricao, preco, categoria FROM produtos")
@@ -380,9 +389,9 @@ if menu == "Criar Orçamento":
 
     st.markdown("---")
     
-    # 🛠️ MÚLTIPLOS SERVIÇOS E INSTALAÇÕES (TABELA DINÂMICA)
-    st.subheader("🛠️ Serviços e Instalações (Múltiplos Campos)")
-    st.write("Adicione quantos serviços, taxas ou instalações precisar, informando a descrição, quantidade e o preço unitário.")
+    # 🛠️ SERVIÇOS (TABELA DINÂMICA)
+    st.subheader("🛠️ Serviços")
+    st.write("Adicione quantos serviços precisar, informando a descrição, quantidade e o preço unitário.")
 
     if "df_servicos_state" not in st.session_state:
         st.session_state.df_servicos_state = pd.DataFrame([
@@ -409,14 +418,14 @@ if menu == "Criar Orçamento":
     st.markdown("---")
     
     st.subheader("🛍️ Itens do Orçamento (Produtos)")
-    incluir_itens = st.radio("Deseja adicionar produtos do estoque neste orçamento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
+    incluir_itens = st.radio("Deseja adicionar produtos do estoque neste documento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
     if "carrinho" not in st.session_state:
         st.session_state.carrinho = []
 
     if incluir_itens == "Sim":
         if not produtos_db:
-            st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um orçamento.")
+            st.warning("⚠️ Cadastre alguns produtos na aba 'Gerenciar Produtos' antes de emitir um documento.")
         else:
             cat_escolhida = st.selectbox("Selecione a Categoria / Setor", ["CFTV", "Informática"])
             produtos_filtrados = [p for p in produtos_db if p[2].strip().lower() == cat_escolhida.lower()]
@@ -519,28 +528,26 @@ if menu == "Criar Orçamento":
         with c3:
             pagamento = st.text_input("Forma de Pagamento", value="À vista / PIX")
 
-        if st.button("💾 Salvar Orçamento"):
+        if st.button(f"💾 Salvar {tipo_documento}"):
             if not cliente:
                 st.error("Preencha o nome do cliente!")
             else:
-                num_orc = gerar_numero_orcamento()
+                num_orc = gerar_numero_documento(tipo_documento)
                 data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
 
                 conn = conectar()
                 cursor = conn.cursor()
                 cursor.execute("""
-                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual))
+                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por, tipo_documento)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual, tipo_documento))
                 
-                # Salva produtos do carrinho
                 for item in st.session_state.carrinho:
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
                         VALUES (?, ?, ?, ?, ?)
                     """, (num_orc, item["produto"], item["quantidade"], item["preco_unitario"], item["subtotal"]))
                 
-                # Salva serviços da tabela dinâmica
                 for srv in lista_servicos_processados:
                     cursor.execute("""
                         INSERT INTO itens_orcamento (numero_orcamento, produto, quantidade, preco_unitario, subtotal)
@@ -550,15 +557,15 @@ if menu == "Criar Orçamento":
                 conn.commit()
                 conn.close()
                 
-                registrar_log(st.session_state.usuario_atual, "CRIAR ORÇAMENTO", f"Orçamento {num_orc} criado para {cliente} em {empresa_selecionada}")
+                registrar_log(st.session_state.usuario_atual, f"CRIAR {tipo_documento.upper()}", f"{tipo_documento} {num_orc} criado para {cliente} em {empresa_selecionada}")
                 st.session_state.carrinho = []
                 st.session_state.ultimo_orcamento_imprimir = num_orc
-                st.success(f"Orçamento nº {num_orc} salvo com sucesso!")
+                st.success(f"{tipo_documento} nº {num_orc} salvo com sucesso!")
                 st.rerun()
 
     if st.session_state.ultimo_orcamento_imprimir:
         st.markdown("---")
-        st.success(f"🖨️ O último orçamento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto!")
+        st.success(f"🖨️ O último documento gerado (**{st.session_state.ultimo_orcamento_imprimir}**) está pronto!")
         if st.button("📄 Abrir Página de Impressão / PDF"):
             st.session_state.modo_impressao = st.session_state.ultimo_orcamento_imprimir
             st.rerun()
@@ -586,13 +593,16 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
 
         logo_b64 = obter_logo_base64()
         tag_logo = f'<img src="data:image/png;base64,{logo_b64}" style="max-height: 80px; margin-bottom: 10px;" />' if logo_b64 else ''
+        
+        # Identifica se é Proposta ou Orçamento baseado no banco
+        tipo_doc_salvo = orc_dados[12] if len(orc_dados) > 12 and orc_dados[12] else "ORÇAMENTO"
 
         html_orcamento = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <meta charset="utf-8">
-            <title>Orçamento {orc_dados[1]}</title>
+            <title>{tipo_doc_salvo} {orc_dados[1]}</title>
             <style>
                 body {{ background-color: #f8f9fa; font-family: Arial, sans-serif; padding: 20px; }}
                 .sheet {{ background: white; color: black; padding: 40px; border: 1px solid #ddd; border-radius: 8px; max-width: 800px; margin: auto; box-shadow: 0 4px 10px rgba(0,0,0,0.1); }}
@@ -617,7 +627,7 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
                 <div class="header">
                     {tag_logo}
                     <h1>{empresa_selecionada}</h1>
-                    <h3 style="margin: 15px 0 0 0; color: #333;">ORÇAMENTO DE SERVIÇOS E PRODUTOS</h3>
+                    <h3 style="margin: 15px 0 0 0; color: #333;">{tipo_doc_salvo.upper()} DE SERVIÇOS E PRODUTOS</h3>
                     <p style="margin: 5px 0; font-weight: bold; color: #d9534f;">Nº: {orc_dados[1]}</p>
                 </div>
                 
@@ -674,10 +684,10 @@ if "modo_impressao" in st.session_state and st.session_state.modo_impressao:
         st.stop()
 
 # ---------------------------------------------------------
-# TELA 2: CONSULTAR ORÇAMENTOS
+# TELA 2: CONSULTAR DOCUMENTOS
 # ---------------------------------------------------------
-elif menu == "Consultar Orçamentos":
-    st.subheader(f"🔍 Consultar Orçamentos — [{empresa_selecionada}]")
+elif menu == "Consultar Documentos":
+    st.subheader(f"🔍 Consultar Documentos — [{empresa_selecionada}]")
     
     pesquisa = st.text_input("Pesquisar por Nome do Cliente ou CPF/CNPJ:")
 
@@ -693,10 +703,12 @@ elif menu == "Consultar Orçamentos":
     conn.close()
 
     if not orcamentos:
-        st.info("Nenhum orçamento encontrado nesta empresa.")
+        st.info("Nenhum documento encontrado nesta empresa.")
     else:
         for orc in orcamentos:
-            with st.expander(f"{orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
+            tipo_doc_reg = orc[12] if len(orc) > 12 and orc[12] else "Orçamento"
+            with st.expander(f"[{tipo_doc_reg}] {orc[1]} - Cliente: {orc[2]} - Data: {orc[9]} - Total: {formatar_moeda(orc[10])}"):
+                st.write(f"**Tipo:** {tipo_doc_reg}")
                 st.write(f"**CPF/CNPJ:** {orc[3]}")
                 st.write(f"**Telefone:** {orc[4]}")
                 st.write(f"**Endereço:** {orc[5]}")
@@ -723,15 +735,15 @@ elif menu == "Consultar Orçamentos":
 
                 if st.session_state.perfil_atual == "Admin":
                     with col_b_exc:
-                        if st.button(f"🗑️ Excluir Orçamento {orc[1]}", key=f"exc_orc_{orc[0]}"):
+                        if st.button(f"🗑️ Excluir Documento {orc[1]}", key=f"exc_orc_{orc[0]}"):
                             conn = conectar()
                             cursor = conn.cursor()
                             cursor.execute("DELETE FROM orcamentos WHERE id = ?", (orc[0],))
                             cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (orc[1],))
                             conn.commit()
                             conn.close()
-                            registrar_log(st.session_state.usuario_atual, "EXCLUIR ORÇAMENTO", f"Orçamento {orc[1]} excluído")
-                            st.success(f"Orçamento {orc[1]} excluído com sucesso!")
+                            registrar_log(st.session_state.usuario_atual, "EXCLUIR DOCUMENTO", f"Documento {orc[1]} excluído")
+                            st.success(f"Documento {orc[1]} excluído com sucesso!")
                             st.rerun()
 
 # ---------------------------------------------------------
