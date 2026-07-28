@@ -35,12 +35,14 @@ def conectar_clientes():
 def conectar_produtos():
     return sqlite3.connect(DB_PRODUTOS_GLOBAL)
 
-# ⚙️ CONFIGURAÇÃO DA LOGOMARCA
-ARQUIVO_LOGO = "logo.png" 
-
+# ⚙️ CONFIGURAÇÃO DA LOGOMARCA INDIVIDUAL POR EMPRESA
 def obter_logo_base64():
-    if os.path.exists(ARQUIVO_LOGO):
-        with open(ARQUIVO_LOGO, "rb") as img_file:
+    # Cria um nome de arquivo seguro baseado no nome da empresa selecionada
+    nome_limpo = "".join(c if c.isalnum() else "_" for c in empresa_selecionada.lower())
+    arquivo_logo_empresa = f"logo_{nome_limpo}.png"
+    
+    if os.path.exists(arquivo_logo_empresa):
+        with open(arquivo_logo_empresa, "rb") as img_file:
             return base64.b64encode(img_file.read()).decode()
     return None
 
@@ -152,7 +154,6 @@ def iniciar_banco():
         conn_gp = conectar_produtos()
         cursor_gp = conn_gp.cursor()
         
-        # Pega descrições já existentes no global
         cursor_gp.execute("SELECT descricao FROM produtos")
         existentes_global = {row[0].strip().lower() for row in cursor_gp.fetchall()}
 
@@ -167,7 +168,6 @@ def iniciar_banco():
                         for p in cursor_e.fetchall():
                             desc = p[1].strip()
                             if desc.lower() not in existentes_global:
-                                # Insere no global
                                 codigo_val = p[0] if p[0] else ""
                                 cursor_gp.execute("INSERT INTO produtos (codigo, descricao, preco, categoria) VALUES (?, ?, ?, ?)", (codigo_val, desc, p[2], p[3]))
                                 existentes_global.add(desc.lower())
@@ -290,6 +290,8 @@ if "ultimo_acesso" not in st.session_state:
     st.session_state.ultimo_acesso = time.time()
 if "ultimo_orcamento_imprimir" not in st.session_state:
     st.session_state.ultimo_orcamento_imprimir = None
+if "modo_edicao_orcamento" not in st.session_state:
+    st.session_state.modo_edicao_orcamento = None
 
 if st.session_state.autenticado:
     tempo_atual = time.time()
@@ -350,11 +352,20 @@ if st.sidebar.button("🚪 Sair do Sistema"):
     st.rerun()
 
 # ---------------------------------------------------------
-# TELA 1: CRIAR ORÇAMENTO / PROPOSTA
+# TELA 1: CRIAR OU EDITAR ORÇAMENTO / PROPOSTA
 # ---------------------------------------------------------
 if menu == "Criar Orçamento / Proposta":
-    tipo_documento = st.radio("Tipo de Documento", ["ORCAMENTO", "PROPOSTA"], horizontal=True)
-    st.subheader(f"📝 Novo {tipo_documento} — [{empresa_selecionada}]")
+    editando_num = st.session_state.modo_edicao_orcamento
+    
+    if editando_num:
+        st.subheader(f"✏️ Editando Documento Nº {editando_num} — [{empresa_selecionada}]")
+        if st.button("❌ Cancelar Edição / Criar Novo"):
+            st.session_state.modo_edicao_orcamento = None
+            st.session_state.carrinho = []
+            st.rerun()
+    else:
+        tipo_documento = st.radio("Tipo de Documento", ["ORCAMENTO", "PROPOSTA"], horizontal=True)
+        st.subheader(f"📝 Novo {tipo_documento} — [{empresa_selecionada}]")
 
     produtos_db = carregar_todos_produtos()
     clientes_cadastrados = carregar_clientes_cadastrados()
@@ -471,7 +482,8 @@ if menu == "Criar Orçamento / Proposta":
 
     st.markdown("---")
     
-    st.subheader(f"🛍️ Itens do {tipo_documento} (Produtos)")
+    titulo_carrinho_str = "🛍️ Itens do Documento (Produtos)" if editando_num else f"🛍️ Itens do Orçamento/Proposta (Produtos)"
+    st.subheader(titulo_carrinho_str)
     incluir_itens = st.radio("Deseja adicionar produtos do estoque neste documento?", ["Não", "Sim"], horizontal=True, key="radio_itens")
 
     if "carrinho" not in st.session_state:
@@ -562,19 +574,38 @@ if menu == "Criar Orçamento / Proposta":
         with c3:
             pagamento = st.text_input("Forma de Pagamento", value="À vista / PIX")
 
-        if st.button(f"💾 Salvar {tipo_documento}"):
+        texto_btn_salvar = f"💾 Salvar Alterações do Documento {editando_num}" if editando_num else f"💾 Salvar {tipo_documento}"
+
+        if st.button(texto_btn_salvar):
             if not cliente:
                 st.error("Preencha o nome do cliente!")
             else:
-                num_orc = gerar_numero_documento(tipo_documento)
-                data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
-
                 conn = conectar()
                 cursor = conn.cursor()
-                cursor.execute("""
-                    INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por, tipo_documento)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual, tipo_documento))
+                
+                if editando_num:
+                    num_orc = editando_num
+                    data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+                    
+                    # Atualiza o cabeçalho existente
+                    cursor.execute("""
+                        UPDATE orcamentos 
+                        SET cliente = ?, documento = ?, telefone = ?, endereco = ?, garantia = ?, validade = ?, pagamento = ?, data = ?, total = ?
+                        WHERE numero_orcamento = ?
+                    """, (cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, num_orc))
+                    
+                    # Remove itens antigos para reescrever com o carrinho atualizado
+                    cursor.execute("DELETE FROM itens_orcamento WHERE numero_orcamento = ?", (num_orc,))
+                    
+                else:
+                    tipo_doc_atual = tipo_documento if 'tipo_documento' in locals() else "ORCAMENTO"
+                    num_orc = gerar_numero_documento(tipo_doc_atual)
+                    data_atual = datetime.datetime.now().strftime("%d/%m/%Y %H:%M")
+
+                    cursor.execute("""
+                        INSERT INTO orcamentos (numero_orcamento, cliente, documento, telefone, endereco, garantia, validade, pagamento, data, total, criado_por, tipo_documento)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, (num_orc, cliente, documento, telefone, endereco, garantia, validade, pagamento, data_atual, total_geral, st.session_state.usuario_atual, tipo_doc_atual))
                 
                 for item in st.session_state.carrinho:
                     cursor.execute("""
@@ -591,10 +622,13 @@ if menu == "Criar Orçamento / Proposta":
                 conn.commit()
                 conn.close()
                 
-                registrar_log(st.session_state.usuario_atual, f"CRIAR {tipo_documento.upper()}", f"{tipo_documento} {num_orc} criado para {cliente} em {empresa_selecionada}")
+                acao_log = f"EDITAR DOCUMENTO" if editando_num else f"CRIAR DOCUMENTO"
+                registrar_log(st.session_state.usuario_atual, acao_log, f"Documento {num_orc} salvo para {cliente} em {empresa_selecionada}")
+                
                 st.session_state.carrinho = []
+                st.session_state.modo_edicao_orcamento = None
                 st.session_state.ultimo_orcamento_imprimir = num_orc
-                st.success(f"{tipo_documento} nº {num_orc} salvo com sucesso!")
+                st.success(f"Documento nº {num_orc} salvo com sucesso!")
                 st.rerun()
 
     if st.session_state.ultimo_orcamento_imprimir:
@@ -760,10 +794,31 @@ elif menu == "Consultar Documentos":
                 for item in itens:
                     st.text(f"- {item[0]} | Qtd: {item[1]} | Unit: {formatar_moeda(item[2])} | Subtotal: {formatar_moeda(item[3])}")
 
-                col_b_imp, col_b_exc = st.columns([1, 4])
+                col_b_imp, col_b_edit, col_b_exc = st.columns([1, 1, 3])
                 with col_b_imp:
                     if st.button(f"🖨️ Imprimir / PDF {orc[1]}", key=f"imp_orc_{orc[0]}"):
                         st.session_state.modo_impressao = orc[1]
+                        st.rerun()
+
+                with col_b_edit:
+                    if st.button(f"✏️ Editar {orc[1]}", key=f"edit_orc_{orc[0]}"):
+                        # Carrega dados do orçamento para a sessão para edição
+                        st.session_state.modo_edicao_orcamento = orc[1]
+                        st.session_state.form_cliente = orc[2]
+                        st.session_state.form_documento = orc[3] or ""
+                        st.session_state.form_telefone = orc[4] or ""
+                        st.session_state.form_endereco = orc[5] or ""
+                        
+                        # Preenche o carrinho com os itens existentes
+                        st.session_state.carrinho = []
+                        for it in itens:
+                            st.session_state.carrinho.append({
+                                "produto": it[0],
+                                "quantidade": it[1],
+                                "preco_unitario": it[2],
+                                "subtotal": it[3]
+                            })
+                        st.success(f"Carregando orçamento {orc[1]} para edição...")
                         st.rerun()
 
                 if st.session_state.perfil_atual == "Admin":
