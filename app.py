@@ -6,6 +6,8 @@ import hashlib
 import time
 import base64
 import os
+import io
+import zipfile
 import pandas as pd
 
 # Configuração da página para ocupar a largura total
@@ -152,7 +154,7 @@ def iniciar_banco():
     conn_prod.commit()
     conn_prod.close()
 
-    # 🔄 MIGRAÇÃO ÚNICA: Importa produtos antigos das empresas para o banco global se faltarem
+    # 🔄 MIGRAÇÃO ÚNICA
     try:
         conn_gp = conectar_produtos()
         cursor_gp = conn_gp.cursor()
@@ -212,7 +214,6 @@ def carregar_clientes_cadastrados():
     except:
         return []
 
-# HORÁRIO CORRIGIDO: Define a timezone do Brasil (UTC-3)
 def registrar_log(usuario, acao, detalhes):
     conn = conectar()
     cursor = conn.cursor()
@@ -285,7 +286,6 @@ def formatar_moeda(valor):
 
 TEMPO_INATIVIDADE_MAX = 600 
 
-# Inicialização segura do session_state
 if "autenticado" not in st.session_state:
     st.session_state.autenticado = False
 if "usuario_atual" not in st.session_state:
@@ -347,7 +347,7 @@ st.sidebar.info(f"📁 Empresa Ativa: **{empresa_selecionada}**")
 opcoes_menu = ["Criar Orçamento / Proposta", "Consultar Documentos", "Gerenciar Produtos", "Gerenciar Clientes"]
 
 if st.session_state.perfil_atual == "Admin":
-    opcoes_menu.extend(["Gerenciar Usuários", "Logs de Auditoria"])
+    opcoes_menu.extend(["Gerenciar Usuários", "Logs de Auditoria", "Backup e Restauração"])
 
 menu = st.sidebar.radio("Navegação", opcoes_menu)
 
@@ -358,10 +358,55 @@ if st.sidebar.button("🚪 Sair do Sistema"):
     st.session_state.perfil_atual = ""
     st.rerun()
 
+
+# ---------------------------------------------------------
+# TELA 7: BACKUP E RESTAURAÇÃO (NOVO MÓDULO PARA NUVEM)
+# ---------------------------------------------------------
+if menu == "Backup e Restauração" and st.session_state.perfil_atual == "Admin":
+    st.subheader("💾 Backup e Restauração de Dados")
+    st.warning("⚠️ Como o sistema está hospedado na nuvem, o servidor pode apagar os arquivos periodicamente. Faça o backup diário aqui para não perder informações!")
+    
+    st.markdown("### ⬇️ 1. Fazer Backup (Download)")
+    st.write("Baixe todos os seus dados atuais (clientes, produtos, orçamentos e logs) para o seu computador.")
+    
+    arquivos_db = [DB_CLIENTES_GLOBAL, DB_PRODUTOS_GLOBAL] + list(EMPRESAS.values())
+    zip_buffer = io.BytesIO()
+    
+    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+        for db_file in arquivos_db:
+            if os.path.exists(db_file):
+                zip_file.write(db_file)
+    
+    st.download_button(
+        label="📦 Baixar Todos os Bancos (Backup.zip)",
+        data=zip_buffer.getvalue(),
+        file_name=f"backup_bancos_{datetime.datetime.now().strftime('%Y%m%d_%H%M')}.zip",
+        mime="application/zip"
+    )
+
+    st.markdown("---")
+    
+    st.markdown("### ⬆️ 2. Restaurar Backup (Upload)")
+    st.write("Se os dados sumirem, descompacte o arquivo `.zip` que você baixou acima e arraste os arquivos `.db` originais aqui para restaurar tudo.")
+    
+    arquivos_upload = st.file_uploader("Faça o upload dos arquivos .db", type=["db"], accept_multiple_files=True)
+    
+    if arquivos_upload:
+        if st.button("🔄 Substituir e Restaurar Dados"):
+            for arquivo in arquivos_upload:
+                with open(arquivo.name, "wb") as f:
+                    f.write(arquivo.getbuffer())
+            
+            # Limpa o cache para o sistema reler os dados restaurados
+            st.cache_data.clear()
+            st.success("✅ Bancos de dados restaurados com sucesso! O sistema foi recarregado com seus dados.")
+            time.sleep(2)
+            st.rerun()
+
 # ---------------------------------------------------------
 # TELA 1: CRIAR OU EDITAR ORÇAMENTO / PROPOSTA
 # ---------------------------------------------------------
-if menu == "Criar Orçamento / Proposta":
+elif menu == "Criar Orçamento / Proposta":
     editando_num = st.session_state.modo_edicao_orcamento
     
     if editando_num:
