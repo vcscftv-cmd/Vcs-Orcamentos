@@ -19,7 +19,7 @@ DB_NAME = "banco_vcs.db"
 # --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
 def get_conn():
   return sqlite3.connect(
-      DB_NAME, check_same_thread=False, timeout=10, isolation_level=None
+      DB_NAME, check_same_thread=False, timeout=15, isolation_level=None
   )
 
 
@@ -78,12 +78,14 @@ def executar_query(query, params=()):
   with get_conn() as conn:
     c = conn.cursor()
     c.execute(query, params)
+    conn.commit()
 
 
 def carregar_tabela(tabela):
   with get_conn() as conn:
-    df = pd.read_sql(f"SELECT * FROM {tabela}", conn)
-    # Garante a presença das colunas críticas para evitar KeyError
+    df = pd.read_sql_query(f"SELECT * FROM {tabela}", conn)
+
+    # Tratamento de colunas faltantes para evitar KeyError
     if tabela == "orcamentos" and not df.empty:
       cols_padrao = {
           "total_final": 0.0,
@@ -98,6 +100,13 @@ def carregar_tabela(tabela):
       for col, val in cols_padrao.items():
         if col not in df.columns:
           df[col] = val
+
+    elif tabela == "itens" and not df.empty:
+      if "valor_compra" not in df.columns:
+        df["valor_compra"] = 0.0
+      if "valor_venda" not in df.columns:
+        df["valor_venda"] = 0.0
+
     return df
 
 
@@ -244,6 +253,28 @@ menu = st.sidebar.radio(
     ],
 )
 
+# --- BACKUP E RESTAURAÇÃO DE BANCO DE DADOS ---
+st.sidebar.write("---")
+st.sidebar.subheader("💾 Backup dos Dados")
+
+if os.path.exists(DB_NAME):
+  with open(DB_NAME, "rb") as f:
+    st.sidebar.download_button(
+        label="📥 Baixar Backup (.db)",
+        data=f,
+        file_name="banco_vcs_backup.db",
+        mime="application/x-sqlite3",
+    )
+
+uploaded_db = st.sidebar.file_uploader(
+    "📤 Restaurar Backup", type=["db"], key="upload_db"
+)
+if uploaded_db is not None:
+  with open(DB_NAME, "wb") as f:
+    f.write(uploaded_db.getbuffer())
+  st.sidebar.success("Banco de dados restaurado com sucesso!")
+  st.rerun()
+
 if menu == "Sair":
   st.session_state["logado"] = False
   st.rerun()
@@ -385,11 +416,6 @@ elif menu == "Cadastro de Itens":
   with aba2:
     df_itens = carregar_tabela("itens")
     if not df_itens.empty:
-      if "valor_compra" not in df_itens.columns:
-        df_itens["valor_compra"] = 0.0
-      if "valor_venda" not in df_itens.columns:
-        df_itens["valor_venda"] = 0.0
-
       df_itens["valor_compra"] = df_itens["valor_compra"].fillna(0.0)
       df_itens["valor_venda"] = df_itens["valor_venda"].fillna(0.0)
       df_itens["Lucro Estimado (R$)"] = (
@@ -681,7 +707,6 @@ elif menu == "Propostas e Orçamentos":
     if not df_orcamentos.empty:
       st.subheader("🔍 Filtros de Busca")
 
-      # Conversão segura para data
       if "data" in df_orcamentos.columns:
         df_orcamentos["data_dt"] = pd.to_datetime(
             df_orcamentos["data"], format="%d/%m/%Y", errors="coerce"
