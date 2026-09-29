@@ -288,7 +288,6 @@ elif menu == "Clientes":
         if st.button("💾 Salvar Alterações na Tabela"):
           for _, row in df_editado.iterrows():
             if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
-              # Atualiza cliente existente
               executar_query(
                   "UPDATE clientes SET nome=?, telefone=?, email=? WHERE id=?",
                   (
@@ -299,7 +298,6 @@ elif menu == "Clientes":
                   ),
               )
             elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
-              # Insere novo cliente inserido via tabela
               executar_query(
                   "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?,"
                   " ?)",
@@ -388,7 +386,6 @@ elif menu == "Cadastro de Itens":
         if st.button("💾 Salvar Alterações nos Itens"):
           for _, row in df_editado.iterrows():
             if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
-              # Atualiza item existente
               executar_query(
                   "UPDATE itens SET nome=?, categoria=?, valor_compra=?,"
                   " valor_venda=? WHERE id=?",
@@ -401,7 +398,6 @@ elif menu == "Cadastro de Itens":
                   ),
               )
             elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
-              # Insere novo item adicionado na tabela
               executar_query(
                   "INSERT INTO itens (nome, categoria, valor_compra,"
                   " valor_venda) VALUES (?, ?, ?, ?)",
@@ -434,7 +430,7 @@ elif menu == "Cadastro de Itens":
 # --- ORÇAMENTOS E PROPOSTAS ---
 elif menu == "Propostas e Orçamentos":
   st.header("📄 Gestão de Propostas e Orçamentos")
-  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Status"])
+  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Filtros"])
 
   df_clientes = carregar_tabela("clientes")
   df_itens = carregar_tabela("itens")
@@ -657,45 +653,135 @@ elif menu == "Propostas e Orçamentos":
 
   with aba2:
     df_orcamentos = carregar_tabela("orcamentos")
+
     if not df_orcamentos.empty:
+      # --- SEÇÃO DE FILTROS AVANÇADOS ---
+      st.subheader("🔍 Filtros de Busca")
+
+      # Garantir conversão da coluna data para tipo datetime para filtragem
+      df_orcamentos["data_dt"] = pd.to_datetime(
+          df_orcamentos["data"], format="%d/%m/%Y", errors="coerce"
+      )
+
+      f_col1, f_col2, f_col3, f_col4 = st.columns(4)
+
+      # Filtro por Nome do Cliente
+      lista_clientes = ["Todos"] + sorted(
+          df_orcamentos["cliente"].dropna().unique().tolist()
+      )
+      filtro_cliente = f_col1.selectbox("Cliente", lista_clientes)
+
+      # Filtro por Tipo de Documento
+      lista_tipos = ["Todos"] + sorted(
+          df_orcamentos["tipo_doc"].dropna().unique().tolist()
+      )
+      filtro_tipo = f_col2.selectbox("Tipo de Documento", lista_tipos)
+
+      # Filtro por Status
+      lista_status = ["Todos", "Pendente", "Aprovado", "Recusado"]
+      filtro_status = f_col3.selectbox("Status", lista_status)
+
+      # Filtro por Intervalo de Datas
+      min_date = (
+          df_orcamentos["data_dt"].min().date()
+          if pd.notnull(df_orcamentos["data_dt"].min())
+          else datetime.now().date()
+      )
+      max_date = (
+          df_orcamentos["data_dt"].max().date()
+          if pd.notnull(df_orcamentos["data_dt"].max())
+          else datetime.now().date()
+      )
+
+      filtro_datas = f_col4.date_input(
+          "Período (Início e Fim)",
+          value=(min_date, max_date),
+          key="filtro_periodo",
+      )
+
+      # Aplicação dos Filtros
+      df_filtrado = df_orcamentos.copy()
+
+      if filtro_cliente != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["cliente"] == filtro_cliente]
+
+      if filtro_tipo != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["tipo_doc"] == filtro_tipo]
+
+      if filtro_status != "Todos":
+        df_filtrado = df_filtrado[df_filtrado["status"] == filtro_status]
+
+      if isinstance(filtro_datas, tuple) and len(filtro_datas) == 2:
+        dt_inicio, dt_fim = filtro_datas
+        df_filtrado = df_filtrado[
+            (df_filtrado["data_dt"].dt.date >= dt_inicio)
+            & (df_filtrado["data_dt"].dt.date <= dt_fim)
+        ]
+
+      st.write("---")
+
+      # Painel de Resumo do Filtro
+      total_registros = len(df_filtrado)
+      soma_valor = (
+          df_filtrado["total_final"].sum() if not df_filtrado.empty else 0.0
+      )
+
+      m_f1, m_f2 = st.columns(2)
+      m_f1.metric("Documentos Encontrados", total_registros)
+      m_f2.metric("Valor Total Filtrado", f"R$ {soma_valor:.2f}")
+
+      st.write("---")
+
+      # Seção para Ações (Alterar Status / Excluir)
       col_st, col_del = st.columns(2)
 
       with col_st:
-        st.subheader("Alterar Status")
-        orcamento_id = st.selectbox(
-            "Selecione o ID", df_orcamentos["id"].tolist()
-        )
-        novo_status = st.selectbox(
-            "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
-        )
-        if st.button("Atualizar Status"):
-          executar_query(
-              "UPDATE orcamentos SET status=? WHERE id=?",
-              (novo_status, orcamento_id),
+        st.subheader("⚙️ Alterar Status")
+        if not df_filtrado.empty:
+          orcamento_id = st.selectbox(
+              "Selecione o ID", df_filtrado["id"].tolist()
           )
-          st.success(f"Status do Documento #{orcamento_id} atualizado!")
-          st.rerun()
+          novo_status = st.selectbox(
+              "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
+          )
+          if st.button("Atualizar Status"):
+            executar_query(
+                "UPDATE orcamentos SET status=? WHERE id=?",
+                (novo_status, orcamento_id),
+            )
+            st.success(f"Status do Documento #{orcamento_id} atualizado!")
+            st.rerun()
+        else:
+          st.info("Nenhum documento disponível para alterar status.")
 
       with col_del:
         st.subheader("🗑️ Excluir Documentos")
-        docs_para_deletar = st.multiselect(
-            "Selecione os IDs para remover:",
-            df_orcamentos["id"].tolist(),
-            key="del_mult_orcamentos",
-        )
-        if st.button("Excluir Documentos Selecionados", type="primary"):
-          if docs_para_deletar:
-            for doc_id in docs_para_deletar:
-              executar_query(
-                  "DELETE FROM orcamentos WHERE id=?", (doc_id,)
-              )
-            st.success("Documentos removidos!")
-            st.rerun()
+        if not df_filtrado.empty:
+          docs_para_deletar = st.multiselect(
+              "Selecione os IDs para remover:",
+              df_filtrado["id"].tolist(),
+              key="del_mult_orcamentos",
+          )
+          if st.button("Excluir Documentos Selecionados", type="primary"):
+            if docs_para_deletar:
+              for doc_id in docs_para_deletar:
+                executar_query(
+                    "DELETE FROM orcamentos WHERE id=?", (doc_id,)
+                )
+              st.success("Documentos removidos!")
+              st.rerun()
+        else:
+          st.info("Nenhum documento disponível para exclusão.")
 
       st.write("---")
-      st.dataframe(df_orcamentos, use_container_width=True)
+      # Exibição do Dataframe Filtrado sem a coluna auxiliar de data
+      colunas_exibicao = [
+          c for c in df_filtrado.columns if c not in ["data_dt"]
+      ]
+      st.dataframe(df_filtrado[colunas_exibicao], use_container_width=True)
+
     else:
-      st.info("Nenhum registro encontrado.")
+      st.info("Nenhum registro encontrado no histórico.")
 
 # --- RELATÓRIO DE LUCRO ---
 elif menu == "Relatório de Lucro":
