@@ -29,16 +29,19 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nome TEXT, telefone TEXT, email TEXT)"""
     )
     c.execute(
-        """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, tipo TEXT, custo REAL, venda REAL)"""
+        """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, categoria TEXT)"""
     )
     c.execute("""CREATE TABLE IF NOT EXISTS orcamentos (
-                 id INTEGER PRIMARY KEY, cliente TEXT, itens TEXT, 
-                 subtotal REAL, taxa_cartao REAL, total_final REAL, 
-                 custo_total REAL, lucro REAL, pagamento TEXT, 
-                 parcelas INTEGER, validade TEXT, data TEXT)""")
+                     id INTEGER PRIMARY KEY, cliente TEXT, itens TEXT, 
+                     servico_desc TEXT, valor_servico REAL,
+                     subtotal REAL, taxa_cartao REAL, total_final REAL, 
+                     pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
     try:
-      c.execute("ALTER TABLE orcamentos ADD COLUMN validade TEXT")
+      c.execute("ALTER TABLE orcamentos ADD COLUMN servico_desc TEXT")
+      c.execute(
+          "ALTER TABLE orcamentos ADD COLUMN valor_servico REAL DEFAULT 0"
+      )
     except sqlite3.OperationalError:
       pass
     conn.commit()
@@ -59,14 +62,21 @@ def carregar_tabela(tabela):
     return pd.read_sql(f"SELECT * FROM {tabela}", conn)
 
 
-# --- FUNÇÃO GERADORA DE PDF COM LOGO ---
+# --- GERADOR DE PDF ---
 def gerar_pdf(
-    empresa_df, cliente, itens, pagamento, parcelas, total, validade_data
+    empresa_df,
+    cliente,
+    itens_formatados,
+    servico_desc,
+    valor_servico,
+    pagamento,
+    parcelas,
+    total,
+    validade_data,
 ):
   pdf = FPDF()
   pdf.add_page()
 
-  # Se existir a logo.png na pasta, adiciona no topo do PDF
   if os.path.exists("logo.png"):
     pdf.image("logo.png", x=10, y=8, w=30)
     pdf.set_y(10)
@@ -102,14 +112,24 @@ def gerar_pdf(
   )
   pdf.ln(12)
 
-  # Dados do Orçamento
   pdf.set_font("helvetica", "B", 12)
   pdf.cell(0, 8, txt=f"Cliente: {cliente}", ln=True)
 
   pdf.set_font("helvetica", size=11)
-  pdf.multi_cell(0, 7, txt=f"Itens / Serviços inclusos:\n{itens}")
-  pdf.ln(4)
+  pdf.multi_cell(0, 7, txt=f"Itens do Orçamento:\n{itens_formatados}")
 
+  if servico_desc:
+    pdf.ln(2)
+    pdf.multi_cell(
+        0,
+        7,
+        txt=(
+            f"Serviço Adicional: {servico_desc} (R$"
+            f" {valor_servico:.2f})"
+        ),
+    )
+
+  pdf.ln(4)
   pdf.cell(
       0, 7, txt=f"Forma de Pagamento: {pagamento} em {parcelas}x", ln=True
   )
@@ -127,7 +147,7 @@ def gerar_pdf(
   return bytes(pdf.output())
 
 
-# --- TELA DE LOGIN ---
+# --- LOGIN ---
 if "logado" not in st.session_state:
   st.session_state["logado"] = False
 
@@ -148,25 +168,23 @@ if not st.session_state["logado"]:
           st.error("Credenciais inválidas!")
   st.stop()
 
-# --- BARRA LATERAL (MENU & LOGO) ---
+# --- MENU LATERAL ---
 if os.path.exists("logo.png"):
   st.sidebar.image("logo.png", use_container_width=True)
 
 st.sidebar.title("Navegação")
 menu = st.sidebar.radio(
     "Módulos",
-    ["Orçamentos", "Clientes", "Itens e Serviços", "Minha Empresa", "Sair"],
+    ["Orçamentos", "Clientes", "Cadastro de Itens", "Minha Empresa", "Sair"],
 )
 
 if menu == "Sair":
   st.session_state["logado"] = False
   st.rerun()
 
-# --- MÓDULO: MINHA EMPRESA ---
+# --- MINHA EMPRESA ---
 if menu == "Minha Empresa":
   st.header("🏢 Dados da Empresa")
-  st.write("Estes dados aparecerão no cabeçalho dos orçamentos e do PDF.")
-
   df_empresa = carregar_tabela("empresa")
   nome_atual = df_empresa.iloc[0]["nome"] if not df_empresa.empty else ""
   cnpj_atual = df_empresa.iloc[0]["cnpj"] if not df_empresa.empty else ""
@@ -187,10 +205,10 @@ if menu == "Minha Empresa":
             "INSERT INTO empresa (nome, cnpj, telefone) VALUES (?, ?, ?)",
             (nome, cnpj, telefone),
         )
-      st.success("Dados salvos com sucesso!")
+      st.success("Dados salvos!")
       st.rerun()
 
-# --- MÓDULO: CLIENTES ---
+# --- CLIENTES ---
 elif menu == "Clientes":
   st.header("👥 Gestão de Clientes")
   aba1, aba2 = st.tabs(["Cadastrar", "Consultar / Editar / Excluir"])
@@ -222,63 +240,51 @@ elif menu == "Clientes":
               " ?, ?, ?)",
               (row["id"], row["nome"], row["telefone"], row["email"]),
           )
-        st.success("Tabela de clientes atualizada!")
+        st.success("Clientes atualizados!")
         st.rerun()
-    else:
-      st.info("Nenhum cliente cadastrado.")
 
-# --- MÓDULO: ITENS E SERVIÇOS ---
-elif menu == "Itens e Serviços":
-  st.header("📦 Materiais e Serviços")
-  aba1, aba2 = st.tabs(["Cadastrar", "Consultar / Editar"])
+# --- CADASTRO DE ITENS ---
+elif menu == "Cadastro de Itens":
+  st.header("📦 Cadastro de Produtos / Equipamentos")
+  aba1, aba2 = st.tabs(["Cadastrar Item", "Consultar / Editar"])
 
   with aba1:
     with st.form("novo_item", clear_on_submit=True):
-      nome = st.text_input("Descrição do Item/Serviço")
-      tipo = st.selectbox("Classificação", ["Material", "Serviço", "Ambos"])
-      c1, c2 = st.columns(2)
-      custo = c1.number_input(
-          "Valor de Custo/Compra (R$)", min_value=0.0, format="%.2f"
+      nome = st.text_input("Descrição do Item (Ex: Notebook Dell, Câmera Bullet)")
+      categoria = st.selectbox(
+          "Categoria do Item", ["CFTV", "Informática", "Outros"]
       )
-      venda = c2.number_input(
-          "Valor de Venda (R$)", min_value=0.0, format="%.2f"
-      )
-      if st.form_submit_button("Cadastrar"):
-        executar_query(
-            "INSERT INTO itens (nome, tipo, custo, venda) VALUES (?, ?, ?,"
-            " ?)",
-            (nome, tipo, custo, venda),
-        )
-        st.success("Item cadastrado!")
-        st.rerun()
+
+      if st.form_submit_button("Cadastrar Item"):
+        if nome:
+          executar_query(
+              "INSERT INTO itens (nome, categoria) VALUES (?, ?)",
+              (nome, categoria),
+          )
+          st.success("Item cadastrado com sucesso!")
+          st.rerun()
+        else:
+          st.error("Informe a descrição do item.")
 
   with aba2:
     df_itens = carregar_tabela("itens")
     if not df_itens.empty:
-      df_itens["Lucro R$"] = df_itens["venda"] - df_itens["custo"]
-      df_itens_editado = st.data_editor(
+      df_editado = st.data_editor(
           df_itens, num_rows="dynamic", use_container_width=True
       )
       if st.button("Salvar Alterações em Itens"):
         executar_query("DELETE FROM itens")
-        for _, row in df_itens_editado.iterrows():
+        for _, row in df_editado.iterrows():
           executar_query(
-              "INSERT INTO itens (id, nome, tipo, custo, venda) VALUES (?, ?,"
-              " ?, ?, ?)",
-              (
-                  row["id"],
-                  row["nome"],
-                  row["tipo"],
-                  row["custo"],
-                  row["venda"],
-              ),
+              "INSERT INTO itens (id, nome, categoria) VALUES (?, ?, ?)",
+              (row["id"], row["nome"], row["categoria"]),
           )
-        st.success("Tabela de itens atualizada!")
+        st.success("Lista de itens atualizada!")
         st.rerun()
     else:
       st.info("Nenhum item cadastrado.")
 
-# --- MÓDULO: ORÇAMENTOS ---
+# --- ORÇAMENTOS ---
 elif menu == "Orçamentos":
   st.header("📄 Gestão de Orçamentos")
   aba1, aba2 = st.tabs(["Criar Novo Orçamento", "Histórico"])
@@ -291,12 +297,42 @@ elif menu == "Orçamentos":
     if df_clientes.empty or df_itens.empty:
       st.warning("Cadastre ao menos 1 cliente e 1 item antes de prosseguir.")
     else:
-      with st.form("novo_orcamento"):
-        cliente = st.selectbox("Cliente", df_clientes["nome"].tolist())
-        itens_selecionados = st.multiselect(
-            "Itens/Serviços", df_itens["nome"].tolist()
+      cliente = st.selectbox("Cliente", df_clientes["nome"].tolist())
+
+      st.subheader("1. Seleção de Equipamentos / Produtos")
+      itens_selecionados = st.multiselect(
+          "Selecione os Itens", df_itens["nome"].tolist()
+      )
+
+      precos_itens = {}
+      if itens_selecionados:
+        st.write("Informe o valor de venda para cada item selecionado:")
+        for item in itens_selecionados:
+          precos_itens[item] = st.number_input(
+              f"Valor de Venda - {item} (R$)",
+              min_value=0.0,
+              format="%.2f",
+              key=f"val_{item}",
+          )
+
+      st.subheader("2. Serviço Adicional")
+      incluir_servico = st.checkbox("Deseja incluir mão de obra ou serviço?")
+
+      servico_desc = ""
+      valor_servico = 0.0
+
+      if incluir_servico:
+        col_s1, col_s2 = st.columns([2, 1])
+        servico_desc = col_s1.text_input(
+            "Descrição do Serviço",
+            placeholder="Ex: Instalação e configuração de CFTV",
+        )
+        valor_servico = col_s2.number_input(
+            "Valor do Serviço (R$)", min_value=0.0, format="%.2f"
         )
 
+      st.subheader("3. Condições de Pagamento")
+      with st.form("form_finalizar"):
         col1, col2, col3, col4 = st.columns(4)
         pagamento = col1.selectbox(
             "Forma de Pagamento",
@@ -319,37 +355,36 @@ elif menu == "Orçamentos":
         validade = col4.date_input("Validade da Proposta")
 
         if st.form_submit_button("Gerar Orçamento"):
-          if not itens_selecionados:
-            st.error("Selecione ao menos um item.")
+          if not itens_selecionados and not (
+              incluir_servico and valor_servico > 0
+          ):
+            st.error("Selecione ao menos um item ou informe um serviço.")
           else:
-            subtotal = sum(
-                float(df_itens[df_itens["nome"] == i].iloc[0]["venda"])
-                for i in itens_selecionados
-            )
-            custo = sum(
-                float(df_itens[df_itens["nome"] == i].iloc[0]["custo"])
-                for i in itens_selecionados
-            )
+            subtotal_itens = sum(precos_itens.values())
+            subtotal_geral = subtotal_itens + valor_servico
 
-            valor_taxa = subtotal * (taxa / 100)
-            total = subtotal + valor_taxa
-            lucro = total - custo - valor_taxa
-            str_itens = "\n- ".join(itens_selecionados)
-            str_itens = "- " + str_itens
+            valor_taxa = subtotal_geral * (taxa / 100)
+            total_final = subtotal_geral + valor_taxa
+
+            linhas_itens = [
+                f"- {item}: R$ {preco:.2f}"
+                for item, preco in precos_itens.items()
+            ]
+            str_itens_formatado = "\n".join(linhas_itens)
             data_str = validade.strftime("%d/%m/%Y")
 
             executar_query(
                 """INSERT INTO orcamentos 
-                                (cliente, itens, subtotal, taxa_cartao, total_final, custo_total, lucro, pagamento, parcelas, validade, data) 
+                                (cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, pagamento, parcelas, validade, data) 
                                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     cliente,
-                    str_itens,
-                    subtotal,
+                    str_itens_formatado,
+                    servico_desc,
+                    valor_servico,
+                    subtotal_geral,
                     valor_taxa,
-                    total,
-                    custo,
-                    lucro,
+                    total_final,
                     pagamento,
                     parcelas,
                     data_str,
@@ -357,54 +392,57 @@ elif menu == "Orçamentos":
                 ),
             )
 
-            st.success("Orçamento gerado e salvo!")
+            st.success("Orçamento gerado com sucesso!")
 
-            # Preparações para Envio de WhatsApp e PDF
+            # WhatsApp
             telefone_cliente = df_clientes[
                 df_clientes["nome"] == cliente
             ].iloc[0]["telefone"]
             telefone_limpo = "".join(
                 filter(str.isdigit, str(telefone_cliente))
             )
-
             empresa_nome = (
                 df_empresa.iloc[0]["nome"]
                 if not df_empresa.empty
                 else "Nossa Empresa"
             )
-            msg_whats = (
-                f"*Orçamento - {empresa_nome}*\n\nOlá,"
-                f" {cliente}! Segue o resumo do seu"
-                f" orçamento:\n\n*Itens:*\n{str_itens}\n\n💳 *Pagamento:*"
-                f" {pagamento} em {parcelas}x\n💰 *Total:* R$"
-                f" {total:.2f}\n⏳ *Válido até:* {data_str}\n\nQualquer dúvida,"
-                " estou à disposição!"
-            )
-            msg_codificada = urllib.parse.quote(msg_whats)
 
-            if len(telefone_limpo) >= 10:
-              link_whats = (
-                  f"https://wa.me/55{telefone_limpo}?text={msg_codificada}"
+            resumo_whats = (
+                f"*Orçamento - {empresa_nome}*\n\nOlá,"
+                f" {cliente}!\n\n*Produtos:*\n{str_itens_formatado}\n"
+            )
+            if incluir_servico and servico_desc:
+              resumo_whats += (
+                  f"\n*Serviço:* {servico_desc} (R$ {valor_servico:.2f})\n"
               )
-            else:
-              link_whats = (
-                  f"https://api.whatsapp.com/send?text={msg_codificada}"
-              )
+            resumo_whats += (
+                f"\n💳 *Pagamento:* {pagamento} em {parcelas}x\n💰 *Total:* R$"
+                f" {total_final:.2f}\n⏳ *Válido até:* {data_str}"
+            )
+
+            msg_codificada = urllib.parse.quote(resumo_whats)
+            link_whats = (
+                f"https://wa.me/55{telefone_limpo}?text={msg_codificada}"
+                if len(telefone_limpo) >= 10
+                else f"https://api.whatsapp.com/send?text={msg_codificada}"
+            )
 
             pdf_bytes = gerar_pdf(
                 df_empresa,
                 cliente,
-                str_itens,
+                str_itens_formatado,
+                servico_desc,
+                valor_servico,
                 pagamento,
                 parcelas,
-                total,
+                total_final,
                 validade,
             )
 
-            # Exibição de Métricas e Botões
-            st.markdown(f"### Valor Final para o Cliente: R$ {total:.2f}")
+            st.markdown(
+                f"### Valor Final para o Cliente: R$ {total_final:.2f}"
+            )
             c1, c2 = st.columns(2)
-
             with c1:
               st.download_button(
                   label="📄 Baixar PDF do Orçamento",
@@ -434,7 +472,7 @@ elif menu == "Orçamentos":
         executar_query(
             "DELETE FROM orcamentos WHERE id=?", (id_excluir,)
         )
-        st.success("Orçamento excluído!")
+        st.success("Excluído!")
         st.rerun()
     else:
-      st.info("Nenhum orçamento cadastrado.")
+      st.info("Nenhum orçamento gerado.")
