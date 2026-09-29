@@ -43,7 +43,6 @@ def init_db():
                      custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
                      pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
-    # Migrações de colunas
     colunas_novas = [
         ("orcamentos", "tipo_doc TEXT DEFAULT 'Orçamento'"),
         ("clientes", "nome TEXT"),
@@ -114,7 +113,6 @@ def gerar_pdf(
       else ""
   )
 
-  # Cabeçalho
   pdf.set_font("helvetica", "B", 16)
   pdf.cell(0, 10, txt=nome_emp, ln=True, align="C")
 
@@ -130,7 +128,6 @@ def gerar_pdf(
   )
   pdf.ln(12)
 
-  # Título Dinâmico (Orçamento vs Proposta de Serviço)
   pdf.set_font("helvetica", "B", 14)
   pdf.cell(
       0,
@@ -145,7 +142,6 @@ def gerar_pdf(
   pdf.cell(0, 7, txt=f"Cliente / Solicitante: {cliente}", ln=True)
   pdf.ln(3)
 
-  # Seção de Itens / Produtos
   if itens_formatados:
     pdf.set_font("helvetica", "B", 11)
     titulo_itens = (
@@ -158,7 +154,6 @@ def gerar_pdf(
     pdf.multi_cell(0, 6, txt=itens_formatados)
     pdf.ln(2)
 
-  # Seção de Serviços
   if servico_desc:
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(0, 7, txt="Escopo do Serviço / Mão de Obra:", ln=True)
@@ -258,7 +253,7 @@ if menu == "Minha Empresa":
 # --- CLIENTES ---
 elif menu == "Clientes":
   st.header("👥 Gestão de Clientes")
-  aba1, aba2 = st.tabs(["Cadastrar", "Consultar / Editar / Excluir"])
+  aba1, aba2 = st.tabs(["Cadastrar", "Consultar / Editar / Excluir Múltiplos"])
 
   with aba1:
     with st.form("novo_cliente", clear_on_submit=True):
@@ -280,23 +275,50 @@ elif menu == "Clientes":
     df_clientes = carregar_tabela("clientes")
     if not df_clientes.empty:
       df_editado = st.data_editor(
-          df_clientes, num_rows="dynamic", use_container_width=True
+          df_clientes,
+          num_rows="dynamic",
+          use_container_width=True,
+          key="editor_clientes",
       )
-      if st.button("Salvar Alterações em Clientes"):
-        executar_query("DELETE FROM clientes")
-        for _, row in df_editado.iterrows():
-          executar_query(
-              "INSERT INTO clientes (id, nome, telefone, email) VALUES (?,"
-              " ?, ?, ?)",
-              (row["id"], row["nome"], row["telefone"], row["email"]),
-          )
-        st.success("Clientes atualizados!")
-        st.rerun()
+
+      col_save, col_del = st.columns(2)
+
+      with col_save:
+        if st.button("💾 Salvar Alterações na Tabela"):
+          executar_query("DELETE FROM clientes")
+          for _, row in df_editado.iterrows():
+            if pd.notna(row["nome"]) and str(row["nome"]).strip() != "":
+              executar_query(
+                  "INSERT INTO clientes (id, nome, telefone, email) VALUES"
+                  " (?, ?, ?, ?)",
+                  (
+                      row.get("id"),
+                      row.get("nome"),
+                      row.get("telefone", ""),
+                      row.get("email", ""),
+                  ),
+              )
+          st.success("Clientes atualizados!")
+          st.rerun()
+
+      with col_del:
+        st.subheader("🗑️ Excluir Vários Clientes")
+        clientes_para_deletar = st.multiselect(
+            "Selecione os clientes que deseja remover:",
+            df_clientes["nome"].tolist(),
+            key="del_mult_clientes",
+        )
+        if st.button("Confirmar Exclusão Selecionada", type="primary"):
+          if clientes_para_deletar:
+            for cli in clientes_para_deletar:
+              executar_query("DELETE FROM clientes WHERE nome=?", (cli,))
+            st.success("Clientes excluídos com sucesso!")
+            st.rerun()
 
 # --- CADASTRO DE ITENS ---
 elif menu == "Cadastro de Itens":
   st.header("📦 Cadastro de Produtos / Equipamentos")
-  aba1, aba2 = st.tabs(["Cadastrar Item", "Consultar / Editar"])
+  aba1, aba2 = st.tabs(["Cadastrar Item", "Consultar / Editar / Excluir"])
 
   with aba1:
     with st.form("novo_item", clear_on_submit=True):
@@ -335,37 +357,61 @@ elif menu == "Cadastro de Itens":
 
       df_itens["valor_compra"] = df_itens["valor_compra"].fillna(0.0)
       df_itens["valor_venda"] = df_itens["valor_venda"].fillna(0.0)
-
       df_itens["Lucro Estimado (R$)"] = (
           df_itens["valor_venda"] - df_itens["valor_compra"]
       )
+
+      st.write(
+          "### ✏️ Edição Direta (Modifique os valores na tabela e clique abaixo)"
+      )
       df_editado = st.data_editor(
-          df_itens, num_rows="dynamic", use_container_width=True
+          df_itens,
+          num_rows="dynamic",
+          use_container_width=True,
+          key="editor_itens",
       )
 
-      if st.button("Salvar Alterações em Itens"):
-        executar_query("DELETE FROM itens")
-        for _, row in df_editado.iterrows():
-          executar_query(
-              "INSERT INTO itens (id, nome, categoria, valor_compra,"
-              " valor_venda) VALUES (?, ?, ?, ?, ?)",
-              (
-                  row["id"],
-                  row["nome"],
-                  row.get("categoria", "Outros"),
-                  row.get("valor_compra", 0.0),
-                  row.get("valor_venda", 0.0),
-              ),
-          )
-        st.success("Lista de itens atualizada!")
-        st.rerun()
+      col_sav_item, col_del_item = st.columns(2)
+
+      with col_sav_item:
+        if st.button("💾 Salvar Alterações nos Itens"):
+          executar_query("DELETE FROM itens")
+          for _, row in df_editado.iterrows():
+            if pd.notna(row["nome"]) and str(row["nome"]).strip() != "":
+              executar_query(
+                  "INSERT INTO itens (id, nome, categoria, valor_compra,"
+                  " valor_venda) VALUES (?, ?, ?, ?, ?)",
+                  (
+                      row.get("id"),
+                      row.get("nome"),
+                      row.get("categoria", "Outros"),
+                      row.get("valor_compra", 0.0),
+                      row.get("valor_venda", 0.0),
+                  ),
+              )
+          st.success("Lista de itens atualizada!")
+          st.rerun()
+
+      with col_del_item:
+        st.write("### 🗑️ Exclusão Múltipla de Itens")
+        itens_para_deletar = st.multiselect(
+            "Selecione os itens para remover de uma vez:",
+            df_itens["nome"].tolist(),
+            key="del_mult_itens",
+        )
+        if st.button("Excluir Itens Selecionados", type="primary"):
+          if itens_para_deletar:
+            for item_nome in itens_para_deletar:
+              executar_query("DELETE FROM itens WHERE nome=?", (item_nome,))
+            st.success("Itens removidos!")
+            st.rerun()
     else:
       st.info("Nenhum item cadastrado.")
 
 # --- ORÇAMENTOS E PROPOSTAS ---
 elif menu == "Propostas e Orçamentos":
   st.header("📄 Gestão de Propostas e Orçamentos")
-  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Status"])
+  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Exclusão Múltipla"])
 
   df_clientes = carregar_tabela("clientes")
   df_itens = carregar_tabela("itens")
@@ -393,10 +439,6 @@ elif menu == "Propostas e Orçamentos":
       tipo_doc = col_t1.selectbox(
           "Tipo de Documento",
           ["Orçamento", "Proposta de Serviço"],
-          help=(
-              "Escolha 'Proposta de Serviço' para focar na mão de obra/projeto"
-              " ou 'Orçamento' para venda de produtos."
-          ),
       )
       cliente = col_t2.selectbox(
           "Cliente", df_clientes["nome"].dropna().tolist()
@@ -593,33 +635,42 @@ elif menu == "Propostas e Orçamentos":
   with aba2:
     df_orcamentos = carregar_tabela("orcamentos")
     if not df_orcamentos.empty:
-      st.subheader("Alterar Status do Documento")
-      col_id, col_stat = st.columns(2)
-      orcamento_id = col_id.selectbox(
-          "Selecione o ID do Documento", df_orcamentos["id"].tolist()
-      )
-      novo_status = col_stat.selectbox(
-          "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
-      )
+      col_st, col_del = st.columns(2)
 
-      if st.button("Atualizar Status"):
-        executar_query(
-            "UPDATE orcamentos SET status=? WHERE id=?",
-            (novo_status, orcamento_id),
+      with col_st:
+        st.subheader("Alterar Status")
+        orcamento_id = st.selectbox(
+            "Selecione o ID", df_orcamentos["id"].tolist()
         )
-        st.success(f"Status do Documento #{orcamento_id} atualizado!")
-        st.rerun()
+        novo_status = st.selectbox(
+            "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
+        )
+        if st.button("Atualizar Status"):
+          executar_query(
+              "UPDATE orcamentos SET status=? WHERE id=?",
+              (novo_status, orcamento_id),
+          )
+          st.success(f"Status do Documento #{orcamento_id} atualizado!")
+          st.rerun()
+
+      with col_del:
+        st.subheader("🗑️ Excluir Vários Documentos")
+        docs_para_deletar = st.multiselect(
+            "Selecione os IDs para remover em lote:",
+            df_orcamentos["id"].tolist(),
+            key="del_mult_orcamentos",
+        )
+        if st.button("Excluir Documentos Selecionados", type="primary"):
+          if docs_para_deletar:
+            for doc_id in docs_para_deletar:
+              executar_query(
+                  "DELETE FROM orcamentos WHERE id=?", (doc_id,)
+              )
+            st.success("Documentos removidos!")
+            st.rerun()
 
       st.write("---")
       st.dataframe(df_orcamentos, use_container_width=True)
-
-      st.write("---")
-      if st.button("Excluir Documento Selecionado"):
-        executar_query(
-            "DELETE FROM orcamentos WHERE id=?", (orcamento_id,)
-        )
-        st.success("Documento excluído!")
-        st.rerun()
     else:
       st.info("Nenhum registro encontrado.")
 
