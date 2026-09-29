@@ -43,7 +43,6 @@ def init_db():
                      custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
                      pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
-    # Garantir que todas as colunas necessárias existam em bancos já criados
     colunas_novas = [
         ("orcamentos", "tipo_doc TEXT DEFAULT 'Orçamento'"),
         ("orcamentos", "servico_desc TEXT"),
@@ -85,7 +84,6 @@ def carregar_tabela(tabela):
   with get_conn() as conn:
     df = pd.read_sql_query(f"SELECT * FROM {tabela}", conn)
 
-    # Tratamento de colunas faltantes para evitar KeyError
     if tabela == "orcamentos" and not df.empty:
       cols_padrao = {
           "total_final": 0.0,
@@ -108,6 +106,87 @@ def carregar_tabela(tabela):
         df["valor_venda"] = 0.0
 
     return df
+
+
+# --- FUNÇÃO DE CÁLCULO DE TAXA DE MÁQUINA ---
+def calcular_taxa_maquina(metodo, bandeira, tipo_operacao, parcelas, antecipacao):
+  if metodo == "Dinheiro / Pix":
+    return 0.0
+
+  if metodo == "Link de Pagamento":
+    # Tabela exata do Link de Pagamento (Imagem 4)
+    taxas_link = {
+        1: 4.20,
+        2: 6.09,
+        3: 7.01,
+        4: 7.91,
+        5: 8.80,
+        6: 9.67,
+        7: 12.59,
+        8: 13.42,
+        9: 14.25,
+        10: 15.06,
+        11: 15.87,
+        12: 16.66,
+    }
+    return taxas_link.get(parcelas, 4.20)
+
+  if metodo == "Cartão Físico (Máquina)":
+    taxa_base = 0.0
+
+    # Adição do percentual de antecipação (Imagem 1)
+    taxa_antecipacao = 0.0
+    if antecipacao == "Automática (+1,79%)":
+      taxa_antecipacao = 1.79
+    elif antecipacao == "Eventual (+2,49%)":
+      taxa_antecipacao = 2.49
+
+    if tipo_operacao == "Débito":
+      dict_debito = {
+          "Mastercard": 1.50,
+          "Visa": 1.50,
+          "Elo": 2.96,
+          "Amex": 0.0,
+          "Cabal": 1.90,
+      }
+      taxa_base = dict_debito.get(bandeira, 1.50)
+      return (
+          taxa_base  # Débito geralmente não aplica antecipação de crédito
+      )
+
+    elif tipo_operacao == "Crédito à Vista (1x)":
+      dict_vista = {
+          "Mastercard": 2.15,
+          "Visa": 2.15,
+          "Elo": 3.99,
+          "Amex": 4.79,
+          "Cabal": 3.29,
+      }
+      taxa_base = dict_vista.get(bandeira, 2.15)
+
+    elif tipo_operacao == "Crédito Parcelado":
+      if 2 <= parcelas <= 6:
+        dict_2a6 = {
+            "Mastercard": 2.00,
+            "Visa": 2.00,
+            "Elo": 4.50,
+            "Amex": 4.99,
+            "Cabal": 3.78,
+        }
+        taxa_base = dict_2a6.get(bandeira, 2.00)
+      else:  # 7x a 12x/21x
+        dict_7a12 = {
+            "Mastercard": 4.00,
+            "Visa": 4.00,
+            "Elo": 4.99,
+            "Amex": 4.99,
+            "Cabal": 4.04,
+        }
+        taxa_base = dict_7a12.get(bandeira, 4.00)
+
+    return taxa_base + taxa_antecipacao
+
+  return 0.0
 
 
 # --- GERADOR DE PDF ---
@@ -162,13 +241,7 @@ def gerar_pdf(
   pdf.ln(12)
 
   pdf.set_font("helvetica", "B", 14)
-  pdf.cell(
-      0,
-      10,
-      txt=f"{tipo_doc.upper()} COMERCIAL",
-      ln=True,
-      align="C",
-  )
+  pdf.cell(0, 10, txt=f"{tipo_doc.upper()} COMERCIAL", ln=True, align="C")
   pdf.ln(4)
 
   pdf.set_font("helvetica", "B", 11)
@@ -191,9 +264,7 @@ def gerar_pdf(
     pdf.set_font("helvetica", "B", 11)
     pdf.cell(0, 7, txt="Escopo do Serviço / Mão de Obra:", ln=True)
     pdf.set_font("helvetica", size=10)
-    pdf.multi_cell(
-        0, 6, txt=f"- {servico_desc} (R$ {valor_servico:.2f})"
-    )
+    pdf.multi_cell(0, 6, txt=f"- {servico_desc} (R$ {valor_servico:.2f})")
     pdf.ln(2)
 
   pdf.ln(4)
@@ -366,7 +437,7 @@ elif menu == "Clientes":
           st.rerun()
 
       with col_del:
-        st.write("### 🗑️ Excluir Clientes")
+        st.write("### 🗑 Excluir Clientes")
         clientes_para_deletar = st.multiselect(
             "Selecione os clientes para remover:",
             df_clientes["nome"].tolist(),
@@ -422,7 +493,7 @@ elif menu == "Cadastro de Itens":
           df_itens["valor_venda"] - df_itens["valor_compra"]
       )
 
-      st.write("### ✏️ Edição de Itens (Altere diretamente na tabela)")
+      st.write("### ✏ Edição de Itens (Altere diretamente na tabela)")
       df_editado = st.data_editor(
           df_itens,
           num_rows="dynamic",
@@ -515,34 +586,60 @@ elif menu == "Propostas e Orçamentos":
 
       st.subheader("1. Seleção de Equipamentos / Produtos")
       itens_selecionados = st.multiselect(
-          "Selecione os Itens", df_itens["nome"].dropna().tolist()
+          "Selecione os Itens",
+          df_itens["nome"].dropna().tolist(),
+          placeholder="Escolha os produtos na lista...",
       )
 
-      precos_venda = {}
-      custos_compra = {}
+      itens_orcamento = []
 
       if itens_selecionados:
-        st.write("Ajuste os valores se necessário:")
+        st.write("---")
+        col_head1, col_head2, col_head3, col_head4 = st.columns([3, 1, 1, 1])
+        col_head1.markdown("**Produto**")
+        col_head2.markdown("**Qtd**")
+        col_head3.markdown("**Preço Venda (Unit.)**")
+        col_head4.markdown("**Custo Compra (Unit.)**")
+
         for item in itens_selecionados:
           dados_item = df_itens[df_itens["nome"] == item].iloc[0]
           v_compra_padrao = float(dados_item.get("valor_compra", 0.0))
           v_venda_padrao = float(dados_item.get("valor_venda", 0.0))
 
-          col_v1, col_v2 = st.columns(2)
-          precos_venda[item] = col_v1.number_input(
-              f"Preço Venda - {item} (R$)",
-              value=v_venda_padrao,
-              min_value=0.0,
-              format="%.2f",
-              key=f"venda_{item}",
+          col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
+
+          col1.write(f"**{item}**")
+
+          qtd = col2.number_input(
+              "Qtd",
+              min_value=1,
+              value=1,
+              step=1,
+              key=f"qtd_{item}",
+              label_visibility="collapsed",
           )
-          custos_compra[item] = col_v2.number_input(
-              f"Custo Compra - {item} (R$)",
+
+          col3.write(f"R$ {v_venda_padrao:.2f}")
+
+          custo_compra = col4.number_input(
+              "Custo",
               value=v_compra_padrao,
               min_value=0.0,
               format="%.2f",
               key=f"custo_{item}",
+              label_visibility="collapsed",
           )
+
+          itens_orcamento.append({
+              "item": item,
+              "qtd": qtd,
+              "venda_unit": v_venda_padrao,
+              "venda_total": v_venda_padrao * qtd,
+              "custo_unit": custo_compra,
+              "custo_total": custo_compra * qtd,
+          })
+
+        st.write("---")
 
       st.subheader("2. Mão de Obra e Serviço")
       incluir_servico = st.checkbox(
@@ -563,47 +660,97 @@ elif menu == "Propostas e Orçamentos":
             "Valor da Mão de Obra (R$)", min_value=0.0, format="%.2f"
         )
 
-      st.subheader("3. Condições de Pagamento")
+      st.subheader("3. Simulação e Condições de Pagamento")
+
+      col_p1, col_p2, col_p3 = st.columns(3)
+      metodo_pagamento = col_p1.selectbox(
+          "Método de Pagamento",
+          [
+              "Dinheiro / Pix",
+              "Cartão Físico (Máquina)",
+              "Link de Pagamento",
+          ],
+      )
+
+      bandeira = "Mastercard"
+      tipo_operacao = "Crédito à Vista (1x)"
+      parcelas = 1
+      antecipacao = "Sem antecipação"
+
+      if metodo_pagamento == "Cartão Físico (Máquina)":
+        bandeira = col_p2.selectbox(
+            "Bandeira do Cartão",
+            ["Mastercard", "Visa", "Elo", "Amex", "Cabal"],
+        )
+        tipo_operacao = col_p3.selectbox(
+            "Tipo de Operação",
+            ["Débito", "Crédito à Vista (1x)", "Crédito Parcelado"],
+        )
+
+        col_p4, col_p5 = st.columns(2)
+        if tipo_operacao == "Crédito Parcelado":
+          parcelas = col_p4.number_input(
+              "Quantidade de Parcelas (x)",
+              min_value=2,
+              max_value=12,
+              value=2,
+              step=1,
+          )
+        else:
+          parcelas = 1
+
+        if tipo_operacao != "Débito":
+          antecipacao = col_p5.selectbox(
+              "Taxa de Antecipação",
+              [
+                  "Sem antecipação",
+                  "Automática (+1,79%)",
+                  "Eventual (+2,49%)",
+              ],
+          )
+
+      elif metodo_pagamento == "Link de Pagamento":
+        bandeira = col_p2.selectbox(
+            "Bandeira", ["Visa / Mastercard / Elo / Amex"]
+        )
+        parcelas = col_p3.number_input(
+            "Quantidade de Parcelas (x)",
+            min_value=1,
+            max_value=12,
+            value=1,
+            step=1,
+        )
+
+      # Cálculo automático da porcentagem da taxa
+      taxa_aplicada = calcular_taxa_maquina(
+          metodo_pagamento, bandeira, tipo_operacao, parcelas, antecipacao
+      )
+
+      # Exibição da Taxa Calculada
+      st.info(f"💡 **Taxa Calculada da Maquininha:** `{taxa_aplicada:.2f}%`")
+
       with st.form("form_finalizar"):
-        col1, col2, col3, col4 = st.columns(4)
-        pagamento = col1.selectbox(
-            "Forma de Pagamento",
-            ["Dinheiro / Pix", "Cartão de Débito", "Cartão de Crédito"],
-        )
-        parcelas = (
-            col2.number_input("Parcelas", min_value=1, max_value=12, step=1)
-            if pagamento == "Cartão de Crédito"
-            else 1
-        )
-        taxa = col3.number_input(
-            "Taxa Maquininha (%)",
-            value=(
-                5.0
-                if pagamento == "Cartão de Crédito"
-                else 2.0 if pagamento == "Cartão de Débito" else 0.0
-            ),
-            step=0.1,
-        )
-        validade = col4.date_input("Validade da Proposta")
+        validade = st.date_input("Validade da Proposta")
 
         if st.form_submit_button(f"Gerar {tipo_doc}"):
-          if not itens_selecionados and not (
+          if not itens_orcamento and not (
               incluir_servico and valor_servico > 0
           ):
             st.error("Selecione ao menos um item ou informe um serviço.")
           else:
-            subtotal_itens = sum(precos_venda.values())
-            custo_itens = sum(custos_compra.values())
+            subtotal_itens = sum(i["venda_total"] for i in itens_orcamento)
+            custo_itens = sum(i["custo_total"] for i in itens_orcamento)
 
             subtotal_geral = subtotal_itens + valor_servico
-            valor_taxa = subtotal_geral * (taxa / 100)
+            valor_taxa = subtotal_geral * (taxa_aplicada / 100)
             total_final = subtotal_geral + valor_taxa
 
             lucro_real = total_final - custo_itens - valor_taxa
 
             linhas_itens = [
-                f"- {item}: R$ {preco:.2f}"
-                for item, preco in precos_venda.items()
+                f"- {i['qtd']}x {i['item']} (R$ {i['venda_unit']:.2f} un) = R$"
+                f" {i['venda_total']:.2f}"
+                for i in itens_orcamento
             ]
             str_itens_formatado = "\n".join(linhas_itens)
             data_str = validade.strftime("%d/%m/%Y")
@@ -624,7 +771,7 @@ elif menu == "Propostas e Orçamentos":
                     custo_itens,
                     lucro_real,
                     "Pendente",
-                    pagamento,
+                    metodo_pagamento,
                     parcelas,
                     data_str,
                     datetime.now().strftime("%d/%m/%Y"),
@@ -656,8 +803,8 @@ elif menu == "Propostas e Orçamentos":
                   f"*Serviço:* {servico_desc} (R$ {valor_servico:.2f})\n\n"
               )
             resumo_whats += (
-                f"💳 *Pagamento:* {pagamento} em {parcelas}x\n💰 *Total:* R$"
-                f" {total_final:.2f}\n⏳ *Válido até:* {data_str}"
+                f"💳 *Pagamento:* {metodo_pagamento} em {parcelas}x\n💰 *Total:*"
+                f" R$ {total_final:.2f}\n⏳ *Válido até:* {data_str}"
             )
 
             msg_codificada = urllib.parse.quote(resumo_whats)
@@ -674,7 +821,7 @@ elif menu == "Propostas e Orçamentos":
                 str_itens_formatado,
                 servico_desc,
                 valor_servico,
-                pagamento,
+                metodo_pagamento,
                 parcelas,
                 total_final,
                 validade,
