@@ -8,7 +8,9 @@ import streamlit as st
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
 st.set_page_config(
-    page_title="Sistema de Orçamentos", layout="wide", page_icon="📄"
+    page_title="Sistema de Orçamentos e Propostas",
+    layout="wide",
+    page_icon="📄",
 )
 
 DB_NAME = "banco_vcs.db"
@@ -16,7 +18,6 @@ DB_NAME = "banco_vcs.db"
 
 # --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
 def get_conn():
-  # Conexão com timeout para evitar bloqueios de escrita
   return sqlite3.connect(
       DB_NAME, check_same_thread=False, timeout=10, isolation_level=None
   )
@@ -26,7 +27,6 @@ def init_db():
   with get_conn() as conn:
     c = conn.cursor()
 
-    # Criação das tabelas base
     c.execute(
         """CREATE TABLE IF NOT EXISTS empresa (id INTEGER PRIMARY KEY, nome TEXT, cnpj TEXT, telefone TEXT)"""
     )
@@ -37,14 +37,15 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, categoria TEXT, valor_compra REAL DEFAULT 0, valor_venda REAL DEFAULT 0)"""
     )
     c.execute("""CREATE TABLE IF NOT EXISTS orcamentos (
-                     id INTEGER PRIMARY KEY, cliente TEXT, itens TEXT, 
+                     id INTEGER PRIMARY KEY, tipo_doc TEXT DEFAULT 'Orçamento', cliente TEXT, itens TEXT, 
                      servico_desc TEXT, valor_servico REAL DEFAULT 0,
                      subtotal REAL DEFAULT 0, taxa_cartao REAL DEFAULT 0, total_final REAL DEFAULT 0, 
                      custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
                      pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
-    # Migração segura para adicionar colunas faltantes caso o banco seja antigo
+    # Migrações de colunas
     colunas_novas = [
+        ("orcamentos", "tipo_doc TEXT DEFAULT 'Orçamento'"),
         ("clientes", "nome TEXT"),
         ("clientes", "telefone TEXT"),
         ("clientes", "email TEXT"),
@@ -79,6 +80,7 @@ def carregar_tabela(tabela):
 
 # --- GERADOR DE PDF ---
 def gerar_pdf(
+    tipo_doc,
     empresa_df,
     cliente,
     itens_formatados,
@@ -99,7 +101,7 @@ def gerar_pdf(
   nome_emp = (
       empresa_df["nome"].iloc[0]
       if not empresa_df.empty and pd.notna(empresa_df["nome"].iloc[0])
-      else "Orçamento"
+      else "Nossa Empresa"
   )
   cnpj = (
       empresa_df["cnpj"].iloc[0]
@@ -112,6 +114,7 @@ def gerar_pdf(
       else ""
   )
 
+  # Cabeçalho
   pdf.set_font("helvetica", "B", 16)
   pdf.cell(0, 10, txt=nome_emp, ln=True, align="C")
 
@@ -127,37 +130,59 @@ def gerar_pdf(
   )
   pdf.ln(12)
 
-  pdf.set_font("helvetica", "B", 12)
-  pdf.cell(0, 8, txt=f"Cliente: {cliente}", ln=True)
+  # Título Dinâmico (Orçamento vs Proposta de Serviço)
+  pdf.set_font("helvetica", "B", 14)
+  pdf.cell(
+      0,
+      10,
+      txt=f"{tipo_doc.upper()} COMERCIAL",
+      ln=True,
+      align="C",
+  )
+  pdf.ln(4)
 
-  pdf.set_font("helvetica", size=11)
-  pdf.multi_cell(0, 7, txt=f"Itens do Orçamento:\n{itens_formatados}")
+  pdf.set_font("helvetica", "B", 11)
+  pdf.cell(0, 7, txt=f"Cliente / Solicitante: {cliente}", ln=True)
+  pdf.ln(3)
 
-  if servico_desc:
-    pdf.ln(2)
-    pdf.multi_cell(
-        0,
-        7,
-        txt=(
-            f"Serviço Adicional: {servico_desc} (R$"
-            f" {valor_servico:.2f})"
-        ),
+  # Seção de Itens / Produtos
+  if itens_formatados:
+    pdf.set_font("helvetica", "B", 11)
+    titulo_itens = (
+        "Equipamentos e Materiais:"
+        if tipo_doc == "Proposta de Serviço"
+        else "Itens do Orçamento:"
     )
+    pdf.cell(0, 7, txt=titulo_itens, ln=True)
+    pdf.set_font("helvetica", size=10)
+    pdf.multi_cell(0, 6, txt=itens_formatados)
+    pdf.ln(2)
+
+  # Seção de Serviços
+  if servico_desc:
+    pdf.set_font("helvetica", "B", 11)
+    pdf.cell(0, 7, txt="Escopo do Serviço / Mão de Obra:", ln=True)
+    pdf.set_font("helvetica", size=10)
+    pdf.multi_cell(
+        0, 6, txt=f"- {servico_desc} (R$ {valor_servico:.2f})"
+    )
+    pdf.ln(2)
 
   pdf.ln(4)
+  pdf.set_font("helvetica", size=10)
   pdf.cell(
-      0, 7, txt=f"Forma de Pagamento: {pagamento} em {parcelas}x", ln=True
+      0, 6, txt=f"Forma de Pagamento: {pagamento} em {parcelas}x", ln=True
   )
   pdf.cell(
       0,
-      7,
+      6,
       txt=f"Validade da Proposta: {validade_data.strftime('%d/%m/%Y')}",
       ln=True,
   )
 
   pdf.ln(6)
   pdf.set_font("helvetica", "B", 14)
-  pdf.cell(0, 10, txt=f"VALOR TOTAL: R$ {total:.2f}", ln=True)
+  pdf.cell(0, 10, txt=f"INVESTIMENTO TOTAL: R$ {total:.2f}", ln=True)
 
   return bytes(pdf.output())
 
@@ -191,7 +216,7 @@ st.sidebar.title("Navegação")
 menu = st.sidebar.radio(
     "Módulos",
     [
-        "Orçamentos",
+        "Propostas e Orçamentos",
         "Relatório de Lucro",
         "Clientes",
         "Cadastro de Itens",
@@ -337,10 +362,10 @@ elif menu == "Cadastro de Itens":
     else:
       st.info("Nenhum item cadastrado.")
 
-# --- ORÇAMENTOS ---
-elif menu == "Orçamentos":
-  st.header("📄 Gestão de Orçamentos")
-  aba1, aba2 = st.tabs(["Criar Novo Orçamento", "Histórico e Status"])
+# --- ORÇAMENTOS E PROPOSTAS ---
+elif menu == "Propostas e Orçamentos":
+  st.header("📄 Gestão de Propostas e Orçamentos")
+  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Status"])
 
   df_clientes = carregar_tabela("clientes")
   df_itens = carregar_tabela("itens")
@@ -364,7 +389,18 @@ elif menu == "Orçamentos":
       if not tem_itens:
         st.warning("Nenhum item cadastrado.")
     else:
-      cliente = st.selectbox("Cliente", df_clientes["nome"].dropna().tolist())
+      col_t1, col_t2 = st.columns([1, 2])
+      tipo_doc = col_t1.selectbox(
+          "Tipo de Documento",
+          ["Orçamento", "Proposta de Serviço"],
+          help=(
+              "Escolha 'Proposta de Serviço' para focar na mão de obra/projeto"
+              " ou 'Orçamento' para venda de produtos."
+          ),
+      )
+      cliente = col_t2.selectbox(
+          "Cliente", df_clientes["nome"].dropna().tolist()
+      )
 
       st.subheader("1. Seleção de Equipamentos / Produtos")
       itens_selecionados = st.multiselect(
@@ -375,7 +411,7 @@ elif menu == "Orçamentos":
       custos_compra = {}
 
       if itens_selecionados:
-        st.write("Ajuste os valores do orçamento se necessário:")
+        st.write("Ajuste os valores se necessário:")
         for item in itens_selecionados:
           dados_item = df_itens[df_itens["nome"] == item].iloc[0]
           v_compra_padrao = float(dados_item.get("valor_compra", 0.0))
@@ -397,8 +433,11 @@ elif menu == "Orçamentos":
               key=f"custo_{item}",
           )
 
-      st.subheader("2. Serviço Adicional")
-      incluir_servico = st.checkbox("Deseja incluir mão de obra ou serviço?")
+      st.subheader("2. Mão de Obra e Serviço")
+      incluir_servico = st.checkbox(
+          "Deseja incluir descrição de mão de obra / serviço?",
+          value=(tipo_doc == "Proposta de Serviço"),
+      )
 
       servico_desc = ""
       valor_servico = 0.0
@@ -406,11 +445,11 @@ elif menu == "Orçamentos":
       if incluir_servico:
         col_s1, col_s2 = st.columns([2, 1])
         servico_desc = col_s1.text_input(
-            "Descrição do Serviço",
-            placeholder="Ex: Instalação e configuração de CFTV",
+            "Descrição do Serviço / Escopo",
+            placeholder="Ex: Instalação, passagem de cabos e configuração de CFTV",
         )
         valor_servico = col_s2.number_input(
-            "Valor do Serviço (R$)", min_value=0.0, format="%.2f"
+            "Valor da Mão de Obra (R$)", min_value=0.0, format="%.2f"
         )
 
       st.subheader("3. Condições de Pagamento")
@@ -436,7 +475,7 @@ elif menu == "Orçamentos":
         )
         validade = col4.date_input("Validade da Proposta")
 
-        if st.form_submit_button("Gerar Orçamento"):
+        if st.form_submit_button(f"Gerar {tipo_doc}"):
           if not itens_selecionados and not (
               incluir_servico and valor_servico > 0
           ):
@@ -460,9 +499,10 @@ elif menu == "Orçamentos":
 
             executar_query(
                 """INSERT INTO orcamentos 
-                                (cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, custo_total, lucro_real, status, pagamento, parcelas, validade, data) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (tipo_doc, cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, custo_total, lucro_real, status, pagamento, parcelas, validade, data) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
+                    tipo_doc,
                     cliente,
                     str_itens_formatado,
                     servico_desc,
@@ -480,7 +520,7 @@ elif menu == "Orçamentos":
                 ),
             )
 
-            st.success("Orçamento gerado com sucesso!")
+            st.success(f"{tipo_doc} gerado com sucesso!")
 
             # WhatsApp
             telefone_cliente = df_clientes[
@@ -496,15 +536,16 @@ elif menu == "Orçamentos":
             )
 
             resumo_whats = (
-                f"*Orçamento - {empresa_nome}*\n\nOlá,"
-                f" {cliente}!\n\n*Produtos:*\n{str_itens_formatado}\n"
+                f"*{tipo_doc} - {empresa_nome}*\n\nOlá, {cliente}!\n\n"
             )
+            if str_itens_formatado:
+              resumo_whats += f"*Itens/Produtos:*\n{str_itens_formatado}\n\n"
             if incluir_servico and servico_desc:
               resumo_whats += (
-                  f"\n*Serviço:* {servico_desc} (R$ {valor_servico:.2f})\n"
+                  f"*Serviço:* {servico_desc} (R$ {valor_servico:.2f})\n\n"
               )
             resumo_whats += (
-                f"\n💳 *Pagamento:* {pagamento} em {parcelas}x\n💰 *Total:* R$"
+                f"💳 *Pagamento:* {pagamento} em {parcelas}x\n💰 *Total:* R$"
                 f" {total_final:.2f}\n⏳ *Válido até:* {data_str}"
             )
 
@@ -516,6 +557,7 @@ elif menu == "Orçamentos":
             )
 
             pdf_bytes = gerar_pdf(
+                tipo_doc,
                 df_empresa,
                 cliente,
                 str_itens_formatado,
@@ -533,9 +575,9 @@ elif menu == "Orçamentos":
             c1, c2 = st.columns(2)
             with c1:
               st.download_button(
-                  label="📄 Baixar PDF do Orçamento",
+                  label=f"📄 Baixar PDF do {tipo_doc}",
                   data=pdf_bytes,
-                  file_name=f"Orcamento_{cliente}.pdf",
+                  file_name=f"{tipo_doc}_{cliente}.pdf",
                   mime="application/pdf",
               )
             with c2:
@@ -551,10 +593,10 @@ elif menu == "Orçamentos":
   with aba2:
     df_orcamentos = carregar_tabela("orcamentos")
     if not df_orcamentos.empty:
-      st.subheader("Alterar Status do Orçamento")
+      st.subheader("Alterar Status do Documento")
       col_id, col_stat = st.columns(2)
       orcamento_id = col_id.selectbox(
-          "Selecione o ID do Orçamento", df_orcamentos["id"].tolist()
+          "Selecione o ID do Documento", df_orcamentos["id"].tolist()
       )
       novo_status = col_stat.selectbox(
           "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
@@ -565,21 +607,21 @@ elif menu == "Orçamentos":
             "UPDATE orcamentos SET status=? WHERE id=?",
             (novo_status, orcamento_id),
         )
-        st.success(f"Status do Orçamento #{orcamento_id} atualizado!")
+        st.success(f"Status do Documento #{orcamento_id} atualizado!")
         st.rerun()
 
       st.write("---")
       st.dataframe(df_orcamentos, use_container_width=True)
 
       st.write("---")
-      if st.button("Excluir Orçamento Selecionado"):
+      if st.button("Excluir Documento Selecionado"):
         executar_query(
             "DELETE FROM orcamentos WHERE id=?", (orcamento_id,)
         )
-        st.success("Orçamento excluído!")
+        st.success("Documento excluído!")
         st.rerun()
     else:
-      st.info("Nenhum orçamento gerado.")
+      st.info("Nenhum registro encontrado.")
 
 # --- RELATÓRIO DE LUCRO ---
 elif menu == "Relatório de Lucro":
@@ -587,7 +629,7 @@ elif menu == "Relatório de Lucro":
   df_orcamentos = carregar_tabela("orcamentos")
 
   if df_orcamentos.empty:
-    st.info("Nenhum orçamento gerado para gerar relatórios.")
+    st.info("Nenhum documento gerado para criar relatórios.")
   else:
     df_aprovados = df_orcamentos[df_orcamentos["status"] == "Aprovado"]
 
@@ -612,11 +654,12 @@ elif menu == "Relatório de Lucro":
     m4.metric("Lucro Líquido Real", f"R$ {lucro_liquido:.2f}")
 
     st.write("---")
-    st.subheader("Orçamentos Aprovados")
+    st.subheader("Documentos Aprovados")
     if not df_aprovados.empty:
       st.dataframe(
           df_aprovados[[
               "id",
+              "tipo_doc",
               "cliente",
               "total_final",
               "custo_total",
@@ -628,6 +671,6 @@ elif menu == "Relatório de Lucro":
       )
     else:
       st.warning(
-          "Você ainda não possui orçamentos com o status 'Aprovado'. Altere o"
-          " status na aba 'Histórico e Status' de Orçamentos."
+          "Você ainda não possui propostas ou orçamentos com o status"
+          " 'Aprovado'."
       )
