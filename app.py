@@ -29,21 +29,33 @@ def init_db():
         """CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nome TEXT, telefone TEXT, email TEXT)"""
     )
     c.execute(
-        """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, categoria TEXT)"""
+        """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, categoria TEXT, valor_compra REAL DEFAULT 0, valor_venda REAL DEFAULT 0)"""
     )
     c.execute("""CREATE TABLE IF NOT EXISTS orcamentos (
                      id INTEGER PRIMARY KEY, cliente TEXT, itens TEXT, 
-                     servico_desc TEXT, valor_servico REAL,
+                     servico_desc TEXT, valor_servico REAL DEFAULT 0,
                      subtotal REAL, taxa_cartao REAL, total_final REAL, 
+                     custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
                      pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
-    try:
-      c.execute("ALTER TABLE orcamentos ADD COLUMN servico_desc TEXT")
-      c.execute(
-          "ALTER TABLE orcamentos ADD COLUMN valor_servico REAL DEFAULT 0"
-      )
-    except sqlite3.OperationalError:
-      pass
+    # Migrações seguras: adiciona apenas colunas faltantes sem apagar dados
+    migracoes = [
+        ("itens", "valor_compra", "REAL DEFAULT 0"),
+        ("itens", "valor_venda", "REAL DEFAULT 0"),
+        ("itens", "categoria", "TEXT DEFAULT 'Outros'"),
+        ("orcamentos", "servico_desc", "TEXT"),
+        ("orcamentos", "valor_servico", "REAL DEFAULT 0"),
+        ("orcamentos", "custo_total", "REAL DEFAULT 0"),
+        ("orcamentos", "lucro_real", "REAL DEFAULT 0"),
+        ("orcamentos", "status", "TEXT DEFAULT 'Pendente'"),
+    ]
+
+    for tabela, coluna, tipo in migracoes:
+      c.execute(f"PRAGMA table_info({tabela})")
+      colunas_existentes = [row[1] for row in c.fetchall()]
+      if coluna not in colunas_existentes:
+        c.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {tipo}")
+
     conn.commit()
 
 
@@ -175,7 +187,14 @@ if os.path.exists("logo.png"):
 st.sidebar.title("Navegação")
 menu = st.sidebar.radio(
     "Módulos",
-    ["Orçamentos", "Clientes", "Cadastro de Itens", "Minha Empresa", "Sair"],
+    [
+        "Orçamentos",
+        "Relatório de Lucro",
+        "Clientes",
+        "Cadastro de Itens",
+        "Minha Empresa",
+        "Sair",
+    ],
 )
 
 if menu == "Sair":
@@ -233,13 +252,12 @@ elif menu == "Clientes":
           df_clientes, num_rows="dynamic", use_container_width=True
       )
       if st.button("Salvar Alterações em Clientes"):
-        executar_query("DELETE FROM clientes")
         for _, row in df_editado.iterrows():
-          executar_query(
-              "INSERT INTO clientes (id, nome, telefone, email) VALUES (?,"
-              " ?, ?, ?)",
-              (row["id"], row["nome"], row["telefone"], row["email"]),
-          )
+          if pd.notna(row.get("id")):
+            executar_query(
+                "UPDATE clientes SET nome=?, telefone=?, email=? WHERE id=?",
+                (row["nome"], row["telefone"], row["email"], row["id"]),
+            )
         st.success("Clientes atualizados!")
         st.rerun()
 
@@ -255,11 +273,20 @@ elif menu == "Cadastro de Itens":
           "Categoria do Item", ["CFTV", "Informática", "Outros"]
       )
 
+      col_c, col_v = st.columns(2)
+      valor_compra = col_c.number_input(
+          "Valor de Custo / Revenda (R$)", min_value=0.0, format="%.2f"
+      )
+      valor_venda = col_v.number_input(
+          "Preço Final de Venda Padrão (R$)", min_value=0.0, format="%.2f"
+      )
+
       if st.form_submit_button("Cadastrar Item"):
         if nome:
           executar_query(
-              "INSERT INTO itens (nome, categoria) VALUES (?, ?)",
-              (nome, categoria),
+              "INSERT INTO itens (nome, categoria, valor_compra, valor_venda)"
+              " VALUES (?, ?, ?, ?)",
+              (nome, categoria, valor_compra, valor_venda),
           )
           st.success("Item cadastrado com sucesso!")
           st.rerun()
@@ -269,16 +296,31 @@ elif menu == "Cadastro de Itens":
   with aba2:
     df_itens = carregar_tabela("itens")
     if not df_itens.empty:
+      if (
+          "valor_venda" in df_itens.columns
+          and "valor_compra" in df_itens.columns
+      ):
+        df_itens["Lucro Estimado (R$)"] = (
+            df_itens["valor_venda"] - df_itens["valor_compra"]
+        )
+
       df_editado = st.data_editor(
           df_itens, num_rows="dynamic", use_container_width=True
       )
       if st.button("Salvar Alterações em Itens"):
-        executar_query("DELETE FROM itens")
         for _, row in df_editado.iterrows():
-          executar_query(
-              "INSERT INTO itens (id, nome, categoria) VALUES (?, ?, ?)",
-              (row["id"], row["nome"], row["categoria"]),
-          )
+          if pd.notna(row.get("id")):
+            executar_query(
+                "UPDATE itens SET nome=?, categoria=?, valor_compra=?,"
+                " valor_venda=? WHERE id=?",
+                (
+                    row["nome"],
+                    row.get("categoria", "Outros"),
+                    row.get("valor_compra", 0.0),
+                    row.get("valor_venda", 0.0),
+                    row["id"],
+                ),
+            )
         st.success("Lista de itens atualizada!")
         st.rerun()
     else:
@@ -287,22 +329,31 @@ elif menu == "Cadastro de Itens":
 # --- ORÇAMENTOS ---
 elif menu == "Orçamentos":
   st.header("📄 Gestão de Orçamentos")
-  aba1, aba2 = st.tabs(["Criar Novo Orçamento", "Histórico"])
+  aba1, aba2 = st.tabs(["Criar Novo Orçamento", "Histórico e Status"])
 
   df_clientes = carregar_tabela("clientes")
   df_itens = carregar_tabela("itens")
   df_empresa = carregar_tabela("empresa")
 
   with aba1:
-    # Verificação ajustada para garantir que ambas as listas contenham dados válidos
-    tem_clientes = not df_clientes.empty and "nome" in df_clientes.columns and len(df_clientes["nome"].dropna()) > 0
-    tem_itens = not df_itens.empty and "nome" in df_itens.columns and len(df_itens["nome"].dropna()) > 0
+    tem_clientes = (
+        not df_clientes.empty
+        and "nome" in df_clientes.columns
+        and len(df_clientes["nome"].dropna()) > 0
+    )
+    tem_itens = (
+        not df_itens.empty
+        and "nome" in df_itens.columns
+        and len(df_itens["nome"].dropna()) > 0
+    )
 
     if not tem_clientes or not tem_itens:
       if not tem_clientes:
-        st.warning("Nenhum cliente cadastrado. Acesse o módulo 'Clientes' para cadastrar.")
+        st.warning("Nenhum cliente cadastrado. Cadastre em 'Clientes'.")
       if not tem_itens:
-        st.warning("Nenhum item cadastrado. Acesse o módulo 'Cadastro de Itens' para cadastrar ao menos 1 produto/equipamento.")
+        st.warning(
+            "Nenhum item cadastrado. Cadastre em 'Cadastro de Itens'."
+        )
     else:
       cliente = st.selectbox("Cliente", df_clientes["nome"].dropna().tolist())
 
@@ -311,15 +362,30 @@ elif menu == "Orçamentos":
           "Selecione os Itens", df_itens["nome"].dropna().tolist()
       )
 
-      precos_itens = {}
+      precos_venda = {}
+      custos_compra = {}
+
       if itens_selecionados:
-        st.write("Informe o valor de venda para cada item selecionado:")
+        st.write("Ajuste os valores do orçamento se necessário:")
         for item in itens_selecionados:
-          precos_itens[item] = st.number_input(
-              f"Valor de Venda - {item} (R$)",
+          dados_item = df_itens[df_itens["nome"] == item].iloc[0]
+          v_compra_padrao = float(dados_item.get("valor_compra", 0.0))
+          v_venda_padrao = float(dados_item.get("valor_venda", 0.0))
+
+          col_v1, col_v2 = st.columns(2)
+          precos_venda[item] = col_v1.number_input(
+              f"Preço Venda - {item} (R$)",
+              value=v_venda_padrao,
               min_value=0.0,
               format="%.2f",
-              key=f"val_{item}",
+              key=f"venda_{item}",
+          )
+          custos_compra[item] = col_v2.number_input(
+              f"Custo Compra - {item} (R$)",
+              value=v_compra_padrao,
+              min_value=0.0,
+              format="%.2f",
+              key=f"custo_{item}",
           )
 
       st.subheader("2. Serviço Adicional")
@@ -367,23 +433,26 @@ elif menu == "Orçamentos":
           ):
             st.error("Selecione ao menos um item ou informe um serviço.")
           else:
-            subtotal_itens = sum(precos_itens.values())
-            subtotal_geral = subtotal_itens + valor_servico
+            subtotal_itens = sum(precos_venda.values())
+            custo_itens = sum(custos_compra.values())
 
+            subtotal_geral = subtotal_itens + valor_servico
             valor_taxa = subtotal_geral * (taxa / 100)
             total_final = subtotal_geral + valor_taxa
 
+            lucro_real = total_final - custo_itens - valor_taxa
+
             linhas_itens = [
                 f"- {item}: R$ {preco:.2f}"
-                for item, preco in precos_itens.items()
+                for item, preco in precos_venda.items()
             ]
             str_itens_formatado = "\n".join(linhas_itens)
             data_str = validade.strftime("%d/%m/%Y")
 
             executar_query(
                 """INSERT INTO orcamentos 
-                                (cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, pagamento, parcelas, validade, data) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                (cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, custo_total, lucro_real, status, pagamento, parcelas, validade, data) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     cliente,
                     str_itens_formatado,
@@ -392,6 +461,9 @@ elif menu == "Orçamentos":
                     subtotal_geral,
                     valor_taxa,
                     total_final,
+                    custo_itens,
+                    lucro_real,
+                    "Pendente",
                     pagamento,
                     parcelas,
                     data_str,
@@ -470,16 +542,96 @@ elif menu == "Orçamentos":
   with aba2:
     df_orcamentos = carregar_tabela("orcamentos")
     if not df_orcamentos.empty:
-      st.dataframe(df_orcamentos, use_container_width=True)
-      st.write("---")
-      id_excluir = st.selectbox(
-          "ID para excluir:", df_orcamentos["id"].tolist()
+      st.subheader("Alterar Status do Orçamento")
+      col_id, col_stat = st.columns(2)
+      orcamento_id = col_id.selectbox(
+          "Selecione o ID do Orçamento", df_orcamentos["id"].tolist()
       )
-      if st.button("Excluir Orçamento"):
+      novo_status = col_stat.selectbox(
+          "Status da Proposta", ["Aprovado", "Pendente", "Recusado"]
+      )
+
+      if st.button("Atualizar Status"):
         executar_query(
-            "DELETE FROM orcamentos WHERE id=?", (id_excluir,)
+            "UPDATE orcamentos SET status=? WHERE id=?",
+            (novo_status, orcamento_id),
         )
-        st.success("Excluído!")
+        st.success(f"Status do Orçamento #{orcamento_id} atualizado!")
+        st.rerun()
+
+      st.write("---")
+      st.dataframe(df_orcamentos, use_container_width=True)
+
+      st.write("---")
+      if st.button("Excluir Orçamento Selecionado"):
+        executar_query(
+            "DELETE FROM orcamentos WHERE id=?", (orcamento_id,)
+        )
+        st.success("Orçamento excluído!")
         st.rerun()
     else:
       st.info("Nenhum orçamento gerado.")
+
+# --- RELATÓRIO DE LUCRO ---
+elif menu == "Relatório de Lucro":
+  st.header("📊 Relatório Financeiro & Base de Lucro")
+  df_orcamentos = carregar_tabela("orcamentos")
+
+  if df_orcamentos.empty:
+    st.info("Nenhum orçamento gerado para gerar relatórios.")
+  else:
+    status_col = (
+        df_orcamentos["status"]
+        if "status" in df_orcamentos.columns
+        else pd.Series()
+    )
+    df_aprovados = df_orcamentos[status_col == "Aprovado"]
+
+    total_faturado = (
+        df_aprovados["total_final"].sum() if not df_aprovados.empty else 0.0
+    )
+    total_custo = (
+        df_aprovados["custo_total"].sum()
+        if not df_aprovados.empty and "custo_total" in df_aprovados.columns
+        else 0.0
+    )
+    total_taxas = (
+        df_aprovados["taxa_cartao"].sum()
+        if not df_aprovados.empty and "taxa_cartao" in df_aprovados.columns
+        else 0.0
+    )
+    lucro_liquido = (
+        df_aprovados["lucro_real"].sum()
+        if not df_aprovados.empty and "lucro_real" in df_aprovados.columns
+        else 0.0
+    )
+
+    st.subheader("Resumo de Vendas Aprovadas")
+    m1, m2, m3, m4 = st.columns(4)
+    m1.metric("Faturamento Total", f"R$ {total_faturado:.2f}")
+    m2.metric("Custo dos Materiais", f"R$ {total_custo:.2f}")
+    m3.metric("Taxas de Maquininha", f"R$ {total_taxas:.2f}")
+    m4.metric("Lucro Líquido Real", f"R$ {lucro_liquido:.2f}")
+
+    st.write("---")
+    st.subheader("Orçamentos Aprovados")
+    if not df_aprovados.empty:
+      cols_exibir = [
+          c
+          for c in [
+              "id",
+              "cliente",
+              "total_final",
+              "custo_total",
+              "taxa_cartao",
+              "lucro_real",
+              "data",
+          ]
+          if c in df_aprovados.columns
+      ]
+      st.dataframe(df_aprovados[cols_exibir], use_container_width=True)
+    else:
+      st.warning(
+          "Você ainda não possui orçamentos com o status 'Aprovado'. Altere o"
+          " status na aba 'Histórico e Status' de Orçamentos."
+      )
