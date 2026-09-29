@@ -43,18 +43,26 @@ def init_db():
                      custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
                      pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
 
+    # Garantir que todas as colunas necessárias existam em bancos já criados
     colunas_novas = [
         ("orcamentos", "tipo_doc TEXT DEFAULT 'Orçamento'"),
+        ("orcamentos", "servico_desc TEXT"),
+        ("orcamentos", "valor_servico REAL DEFAULT 0"),
+        ("orcamentos", "subtotal REAL DEFAULT 0"),
+        ("orcamentos", "taxa_cartao REAL DEFAULT 0"),
+        ("orcamentos", "total_final REAL DEFAULT 0"),
+        ("orcamentos", "custo_total REAL DEFAULT 0"),
+        ("orcamentos", "lucro_real REAL DEFAULT 0"),
+        ("orcamentos", "status TEXT DEFAULT 'Pendente'"),
+        ("orcamentos", "pagamento TEXT"),
+        ("orcamentos", "parcelas INTEGER DEFAULT 1"),
+        ("orcamentos", "validade TEXT"),
+        ("orcamentos", "data TEXT"),
         ("clientes", "nome TEXT"),
         ("clientes", "telefone TEXT"),
         ("clientes", "email TEXT"),
         ("itens", "valor_compra REAL DEFAULT 0"),
         ("itens", "valor_venda REAL DEFAULT 0"),
-        ("orcamentos", "servico_desc TEXT"),
-        ("orcamentos", "valor_servico REAL DEFAULT 0"),
-        ("orcamentos", "custo_total REAL DEFAULT 0"),
-        ("orcamentos", "lucro_real REAL DEFAULT 0"),
-        ("orcamentos", "status TEXT DEFAULT 'Pendente'"),
     ]
     for tabela, col_def in colunas_novas:
       try:
@@ -74,7 +82,23 @@ def executar_query(query, params=()):
 
 def carregar_tabela(tabela):
   with get_conn() as conn:
-    return pd.read_sql(f"SELECT * FROM {tabela}", conn)
+    df = pd.read_sql(f"SELECT * FROM {tabela}", conn)
+    # Garante a presença das colunas críticas para evitar KeyError
+    if tabela == "orcamentos" and not df.empty:
+      cols_padrao = {
+          "total_final": 0.0,
+          "custo_total": 0.0,
+          "lucro_real": 0.0,
+          "taxa_cartao": 0.0,
+          "status": "Pendente",
+          "tipo_doc": "Orçamento",
+          "cliente": "",
+          "data": "",
+      }
+      for col, val in cols_padrao.items():
+        if col not in df.columns:
+          df[col] = val
+    return df
 
 
 # --- GERADOR DE PDF ---
@@ -655,41 +679,40 @@ elif menu == "Propostas e Orçamentos":
     df_orcamentos = carregar_tabela("orcamentos")
 
     if not df_orcamentos.empty:
-      # --- SEÇÃO DE FILTROS AVANÇADOS ---
       st.subheader("🔍 Filtros de Busca")
 
-      # Garantir conversão da coluna data para tipo datetime para filtragem
-      df_orcamentos["data_dt"] = pd.to_datetime(
-          df_orcamentos["data"], format="%d/%m/%Y", errors="coerce"
-      )
+      # Conversão segura para data
+      if "data" in df_orcamentos.columns:
+        df_orcamentos["data_dt"] = pd.to_datetime(
+            df_orcamentos["data"], format="%d/%m/%Y", errors="coerce"
+        )
+      else:
+        df_orcamentos["data_dt"] = pd.Timestamp.now()
 
       f_col1, f_col2, f_col3, f_col4 = st.columns(4)
 
-      # Filtro por Nome do Cliente
       lista_clientes = ["Todos"] + sorted(
           df_orcamentos["cliente"].dropna().unique().tolist()
       )
       filtro_cliente = f_col1.selectbox("Cliente", lista_clientes)
 
-      # Filtro por Tipo de Documento
       lista_tipos = ["Todos"] + sorted(
           df_orcamentos["tipo_doc"].dropna().unique().tolist()
       )
       filtro_tipo = f_col2.selectbox("Tipo de Documento", lista_tipos)
 
-      # Filtro por Status
       lista_status = ["Todos", "Pendente", "Aprovado", "Recusado"]
       filtro_status = f_col3.selectbox("Status", lista_status)
 
-      # Filtro por Intervalo de Datas
+      valid_dates = df_orcamentos["data_dt"].dropna()
       min_date = (
-          df_orcamentos["data_dt"].min().date()
-          if pd.notnull(df_orcamentos["data_dt"].min())
+          valid_dates.min().date()
+          if not valid_dates.empty
           else datetime.now().date()
       )
       max_date = (
-          df_orcamentos["data_dt"].max().date()
-          if pd.notnull(df_orcamentos["data_dt"].max())
+          valid_dates.max().date()
+          if not valid_dates.empty
           else datetime.now().date()
       )
 
@@ -699,7 +722,6 @@ elif menu == "Propostas e Orçamentos":
           key="filtro_periodo",
       )
 
-      # Aplicação dos Filtros
       df_filtrado = df_orcamentos.copy()
 
       if filtro_cliente != "Todos":
@@ -720,10 +742,11 @@ elif menu == "Propostas e Orçamentos":
 
       st.write("---")
 
-      # Painel de Resumo do Filtro
       total_registros = len(df_filtrado)
       soma_valor = (
-          df_filtrado["total_final"].sum() if not df_filtrado.empty else 0.0
+          df_filtrado["total_final"].sum()
+          if "total_final" in df_filtrado.columns and not df_filtrado.empty
+          else 0.0
       )
 
       m_f1, m_f2 = st.columns(2)
@@ -732,7 +755,6 @@ elif menu == "Propostas e Orçamentos":
 
       st.write("---")
 
-      # Seção para Ações (Alterar Status / Excluir)
       col_st, col_del = st.columns(2)
 
       with col_st:
@@ -774,7 +796,6 @@ elif menu == "Propostas e Orçamentos":
           st.info("Nenhum documento disponível para exclusão.")
 
       st.write("---")
-      # Exibição do Dataframe Filtrado sem a coluna auxiliar de data
       colunas_exibicao = [
           c for c in df_filtrado.columns if c not in ["data_dt"]
       ]
@@ -794,16 +815,24 @@ elif menu == "Relatório de Lucro":
     df_aprovados = df_orcamentos[df_orcamentos["status"] == "Aprovado"]
 
     total_faturado = (
-        df_aprovados["total_final"].sum() if not df_aprovados.empty else 0.0
+        df_aprovados["total_final"].sum()
+        if "total_final" in df_aprovados.columns and not df_aprovados.empty
+        else 0.0
     )
     total_custo = (
-        df_aprovados["custo_total"].sum() if not df_aprovados.empty else 0.0
+        df_aprovados["custo_total"].sum()
+        if "custo_total" in df_aprovados.columns and not df_aprovados.empty
+        else 0.0
     )
     total_taxas = (
-        df_aprovados["taxa_cartao"].sum() if not df_aprovados.empty else 0.0
+        df_aprovados["taxa_cartao"].sum()
+        if "taxa_cartao" in df_aprovados.columns and not df_aprovados.empty
+        else 0.0
     )
     lucro_liquido = (
-        df_aprovados["lucro_real"].sum() if not df_aprovados.empty else 0.0
+        df_aprovados["lucro_real"].sum()
+        if "lucro_real" in df_aprovados.columns and not df_aprovados.empty
+        else 0.0
     )
 
     st.subheader("Resumo de Vendas Aprovadas")
@@ -816,19 +845,20 @@ elif menu == "Relatório de Lucro":
     st.write("---")
     st.subheader("Documentos Aprovados")
     if not df_aprovados.empty:
-      st.dataframe(
-          df_aprovados[[
-              "id",
-              "tipo_doc",
-              "cliente",
-              "total_final",
-              "custo_total",
-              "taxa_cartao",
-              "lucro_real",
-              "data",
-          ]],
-          use_container_width=True,
-      )
+      cols_desejadas = [
+          "id",
+          "tipo_doc",
+          "cliente",
+          "total_final",
+          "custo_total",
+          "taxa_cartao",
+          "lucro_real",
+          "data",
+      ]
+      cols_existentes = [
+          c for c in cols_desejadas if c in df_aprovados.columns
+      ]
+      st.dataframe(df_aprovados[cols_existentes], use_container_width=True)
     else:
       st.warning(
           "Você ainda não possui propostas ou orçamentos com o status"
