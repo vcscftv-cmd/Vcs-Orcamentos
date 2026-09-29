@@ -294,14 +294,21 @@ elif menu == "Orçamentos":
   df_empresa = carregar_tabela("empresa")
 
   with aba1:
-    if df_clientes.empty or df_itens.empty:
-      st.warning("Cadastre ao menos 1 cliente e 1 item antes de prosseguir.")
+    # Verificação ajustada para garantir que ambas as listas contenham dados válidos
+    tem_clientes = not df_clientes.empty and "nome" in df_clientes.columns and len(df_clientes["nome"].dropna()) > 0
+    tem_itens = not df_itens.empty and "nome" in df_itens.columns and len(df_itens["nome"].dropna()) > 0
+
+    if not tem_clientes or not tem_itens:
+      if not tem_clientes:
+        st.warning("Nenhum cliente cadastrado. Acesse o módulo 'Clientes' para cadastrar.")
+      if not tem_itens:
+        st.warning("Nenhum item cadastrado. Acesse o módulo 'Cadastro de Itens' para cadastrar ao menos 1 produto/equipamento.")
     else:
-      cliente = st.selectbox("Cliente", df_clientes["nome"].tolist())
+      cliente = st.selectbox("Cliente", df_clientes["nome"].dropna().tolist())
 
       st.subheader("1. Seleção de Equipamentos / Produtos")
       itens_selecionados = st.multiselect(
-          "Selecione os Itens", df_itens["nome"].tolist()
+          "Selecione os Itens", df_itens["nome"].dropna().tolist()
       )
 
       precos_itens = {}
