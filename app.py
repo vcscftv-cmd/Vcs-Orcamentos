@@ -247,13 +247,13 @@ if menu == "Minha Empresa":
             "INSERT INTO empresa (nome, cnpj, telefone) VALUES (?, ?, ?)",
             (nome, cnpj, telefone),
         )
-      st.success("Dados salvos!")
+      st.success("Dados salvos com sucesso!")
       st.rerun()
 
 # --- CLIENTES ---
 elif menu == "Clientes":
   st.header("👥 Gestão de Clientes")
-  aba1, aba2 = st.tabs(["Cadastrar", "Consultar / Editar / Excluir Múltiplos"])
+  aba1, aba2 = st.tabs(["Cadastrar Cliente", "Consultar / Editar / Excluir"])
 
   with aba1:
     with st.form("novo_cliente", clear_on_submit=True):
@@ -266,7 +266,7 @@ elif menu == "Clientes":
               "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?, ?)",
               (nome, telefone, email),
           )
-          st.success("Cliente cadastrado!")
+          st.success("Cliente cadastrado com sucesso!")
           st.rerun()
         else:
           st.error("Por favor, preencha o nome do cliente.")
@@ -274,6 +274,7 @@ elif menu == "Clientes":
   with aba2:
     df_clientes = carregar_tabela("clientes")
     if not df_clientes.empty:
+      st.write("### ✏️ Edição de Clientes (Altere diretamente na tabela)")
       df_editado = st.data_editor(
           df_clientes,
           num_rows="dynamic",
@@ -285,26 +286,36 @@ elif menu == "Clientes":
 
       with col_save:
         if st.button("💾 Salvar Alterações na Tabela"):
-          executar_query("DELETE FROM clientes")
           for _, row in df_editado.iterrows():
-            if pd.notna(row["nome"]) and str(row["nome"]).strip() != "":
+            if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
+              # Atualiza cliente existente
               executar_query(
-                  "INSERT INTO clientes (id, nome, telefone, email) VALUES"
-                  " (?, ?, ?, ?)",
+                  "UPDATE clientes SET nome=?, telefone=?, email=? WHERE id=?",
                   (
+                      row.get("nome"),
+                      row.get("telefone", ""),
+                      row.get("email", ""),
                       row.get("id"),
+                  ),
+              )
+            elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
+              # Insere novo cliente inserido via tabela
+              executar_query(
+                  "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?,"
+                  " ?)",
+                  (
                       row.get("nome"),
                       row.get("telefone", ""),
                       row.get("email", ""),
                   ),
               )
-          st.success("Clientes atualizados!")
+          st.success("Alterações salvas com segurança!")
           st.rerun()
 
       with col_del:
-        st.subheader("🗑️ Excluir Vários Clientes")
+        st.write("### 🗑️ Excluir Clientes")
         clientes_para_deletar = st.multiselect(
-            "Selecione os clientes que deseja remover:",
+            "Selecione os clientes para remover:",
             df_clientes["nome"].tolist(),
             key="del_mult_clientes",
         )
@@ -314,6 +325,8 @@ elif menu == "Clientes":
               executar_query("DELETE FROM clientes WHERE nome=?", (cli,))
             st.success("Clientes excluídos com sucesso!")
             st.rerun()
+    else:
+      st.info("Nenhum cliente cadastrado.")
 
 # --- CADASTRO DE ITENS ---
 elif menu == "Cadastro de Itens":
@@ -361,9 +374,7 @@ elif menu == "Cadastro de Itens":
           df_itens["valor_venda"] - df_itens["valor_compra"]
       )
 
-      st.write(
-          "### ✏️ Edição Direta (Modifique os valores na tabela e clique abaixo)"
-      )
+      st.write("### ✏️ Edição de Itens (Altere diretamente na tabela)")
       df_editado = st.data_editor(
           df_itens,
           num_rows="dynamic",
@@ -375,27 +386,39 @@ elif menu == "Cadastro de Itens":
 
       with col_sav_item:
         if st.button("💾 Salvar Alterações nos Itens"):
-          executar_query("DELETE FROM itens")
           for _, row in df_editado.iterrows():
-            if pd.notna(row["nome"]) and str(row["nome"]).strip() != "":
+            if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
+              # Atualiza item existente
               executar_query(
-                  "INSERT INTO itens (id, nome, categoria, valor_compra,"
-                  " valor_venda) VALUES (?, ?, ?, ?, ?)",
+                  "UPDATE itens SET nome=?, categoria=?, valor_compra=?,"
+                  " valor_venda=? WHERE id=?",
                   (
+                      row.get("nome"),
+                      row.get("categoria", "Outros"),
+                      row.get("valor_compra", 0.0),
+                      row.get("valor_venda", 0.0),
                       row.get("id"),
+                  ),
+              )
+            elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
+              # Insere novo item adicionado na tabela
+              executar_query(
+                  "INSERT INTO itens (nome, categoria, valor_compra,"
+                  " valor_venda) VALUES (?, ?, ?, ?)",
+                  (
                       row.get("nome"),
                       row.get("categoria", "Outros"),
                       row.get("valor_compra", 0.0),
                       row.get("valor_venda", 0.0),
                   ),
               )
-          st.success("Lista de itens atualizada!")
+          st.success("Lista de itens atualizada com segurança!")
           st.rerun()
 
       with col_del_item:
-        st.write("### 🗑️ Exclusão Múltipla de Itens")
+        st.write("### 🗑️ Excluir Itens")
         itens_para_deletar = st.multiselect(
-            "Selecione os itens para remover de uma vez:",
+            "Selecione os itens para remover:",
             df_itens["nome"].tolist(),
             key="del_mult_itens",
         )
@@ -411,7 +434,7 @@ elif menu == "Cadastro de Itens":
 # --- ORÇAMENTOS E PROPOSTAS ---
 elif menu == "Propostas e Orçamentos":
   st.header("📄 Gestão de Propostas e Orçamentos")
-  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Exclusão Múltipla"])
+  aba1, aba2 = st.tabs(["Criar Nova Proposta", "Histórico e Status"])
 
   df_clientes = carregar_tabela("clientes")
   df_itens = carregar_tabela("itens")
@@ -654,9 +677,9 @@ elif menu == "Propostas e Orçamentos":
           st.rerun()
 
       with col_del:
-        st.subheader("🗑️ Excluir Vários Documentos")
+        st.subheader("🗑️ Excluir Documentos")
         docs_para_deletar = st.multiselect(
-            "Selecione os IDs para remover em lote:",
+            "Selecione os IDs para remover:",
             df_orcamentos["id"].tolist(),
             key="del_mult_orcamentos",
         )
