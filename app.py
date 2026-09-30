@@ -1,9 +1,10 @@
 import os
-import sqlite3
 import urllib.parse
 from datetime import datetime
 from fpdf import FPDF
 import pandas as pd
+import psycopg2
+import psycopg2.extras
 import streamlit as st
 
 # --- CONFIGURAÇÃO DA PÁGINA ---
@@ -13,76 +14,93 @@ st.set_page_config(
     page_icon="📄",
 )
 
-DB_NAME = "banco_vcs.db"
+# URI padrão ou busca do Streamlit Secrets
+DEFAULT_DB_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.uclqwnxvgkfdzrytiqqw.supabase.co:5432/postgres"
 
 
-# --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS ---
+def get_db_url():
+  if "DATABASE_URL" in st.secrets:
+    return st.secrets["DATABASE_URL"]
+  return DEFAULT_DB_URL
+
+
+# --- CONEXÃO E CRIAÇÃO DO BANCO DE DADOS (POSTGRESQL / SUPABASE) ---
 def get_conn():
-  return sqlite3.connect(
-      DB_NAME, check_same_thread=False, timeout=15, isolation_level=None
-  )
+  return psycopg2.connect(get_db_url())
 
 
 def init_db():
-  with get_conn() as conn:
-    c = conn.cursor()
-
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS empresa (id INTEGER PRIMARY KEY, nome TEXT, cnpj TEXT, telefone TEXT)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS clientes (id INTEGER PRIMARY KEY, nome TEXT, telefone TEXT, email TEXT)"""
-    )
-    c.execute(
-        """CREATE TABLE IF NOT EXISTS itens (id INTEGER PRIMARY KEY, nome TEXT, categoria TEXT, valor_compra REAL DEFAULT 0, valor_venda REAL DEFAULT 0)"""
-    )
-    c.execute("""CREATE TABLE IF NOT EXISTS orcamentos (
-                     id INTEGER PRIMARY KEY, tipo_doc TEXT DEFAULT 'Orçamento', cliente TEXT, itens TEXT, 
-                     servico_desc TEXT, valor_servico REAL DEFAULT 0,
-                     subtotal REAL DEFAULT 0, taxa_cartao REAL DEFAULT 0, total_final REAL DEFAULT 0, 
-                     custo_total REAL DEFAULT 0, lucro_real REAL DEFAULT 0, status TEXT DEFAULT 'Pendente',
-                     pagamento TEXT, parcelas INTEGER, validade TEXT, data TEXT)""")
-
-    colunas_novas = [
-        ("orcamentos", "tipo_doc TEXT DEFAULT 'Orçamento'"),
-        ("orcamentos", "servico_desc TEXT"),
-        ("orcamentos", "valor_servico REAL DEFAULT 0"),
-        ("orcamentos", "subtotal REAL DEFAULT 0"),
-        ("orcamentos", "taxa_cartao REAL DEFAULT 0"),
-        ("orcamentos", "total_final REAL DEFAULT 0"),
-        ("orcamentos", "custo_total REAL DEFAULT 0"),
-        ("orcamentos", "lucro_real REAL DEFAULT 0"),
-        ("orcamentos", "status TEXT DEFAULT 'Pendente'"),
-        ("orcamentos", "pagamento TEXT"),
-        ("orcamentos", "parcelas INTEGER DEFAULT 1"),
-        ("orcamentos", "validade TEXT"),
-        ("orcamentos", "data TEXT"),
-        ("clientes", "nome TEXT"),
-        ("clientes", "telefone TEXT"),
-        ("clientes", "email TEXT"),
-        ("itens", "valor_compra REAL DEFAULT 0"),
-        ("itens", "valor_venda REAL DEFAULT 0"),
-    ]
-    for tabela, col_def in colunas_novas:
-      try:
-        c.execute(f"ALTER TABLE {tabela} ADD COLUMN {col_def}")
-      except sqlite3.OperationalError:
-        pass
+  try:
+    conn = get_conn()
+    with conn.cursor() as c:
+      c.execute("""
+                CREATE TABLE IF NOT EXISTS empresa (
+                    id SERIAL PRIMARY KEY, 
+                    nome TEXT, 
+                    cnpj TEXT, 
+                    telefone TEXT
+                )
+            """)
+      c.execute("""
+                CREATE TABLE IF NOT EXISTS clientes (
+                    id SERIAL PRIMARY KEY, 
+                    nome TEXT, 
+                    telefone TEXT, 
+                    email TEXT
+                )
+            """)
+      c.execute("""
+                CREATE TABLE IF NOT EXISTS itens (
+                    id SERIAL PRIMARY KEY, 
+                    nome TEXT, 
+                    categoria TEXT, 
+                    valor_compra DOUBLE PRECISION DEFAULT 0, 
+                    valor_venda DOUBLE PRECISION DEFAULT 0
+                )
+            """)
+      c.execute("""
+                CREATE TABLE IF NOT EXISTS orcamentos (
+                    id SERIAL PRIMARY KEY, 
+                    tipo_doc TEXT DEFAULT 'Orçamento', 
+                    cliente TEXT, 
+                    itens TEXT, 
+                    servico_desc TEXT, 
+                    valor_servico DOUBLE PRECISION DEFAULT 0, 
+                    subtotal DOUBLE PRECISION DEFAULT 0, 
+                    taxa_cartao DOUBLE PRECISION DEFAULT 0, 
+                    total_final DOUBLE PRECISION DEFAULT 0, 
+                    custo_total DOUBLE PRECISION DEFAULT 0, 
+                    lucro_real DOUBLE PRECISION DEFAULT 0, 
+                    status TEXT DEFAULT 'Pendente', 
+                    pagamento TEXT, 
+                    parcelas INTEGER DEFAULT 1, 
+                    validade TEXT, 
+                    data TEXT
+                )
+            """)
+      conn.commit()
+    conn.close()
+  except Exception as e:
+    st.error(f"Erro ao ligar à base de dados no Supabase: {e}")
 
 
 init_db()
 
 
 def executar_query(query, params=()):
-  with get_conn() as conn:
-    c = conn.cursor()
-    c.execute(query, params)
+  conn = get_conn()
+  try:
+    with conn.cursor() as c:
+      c.execute(query, params)
     conn.commit()
+  finally:
+    conn.close()
 
 
 def carregar_tabela(tabela):
-  with get_conn() as conn:
-    df = pd.read_sql_query(f"SELECT * FROM {tabela}", conn)
+  conn = get_conn()
+  try:
+    df = pd.read_sql_query(f"SELECT * FROM {tabela} ORDER BY id ASC", conn)
 
     if tabela == "orcamentos" and not df.empty:
       cols_padrao = {
@@ -106,6 +124,8 @@ def carregar_tabela(tabela):
         df["valor_venda"] = 0.0
 
     return df
+  finally:
+    conn.close()
 
 
 # --- FUNÇÃO DE CÁLCULO DE TAXA DE MÁQUINA ---
@@ -114,7 +134,6 @@ def calcular_taxa_maquina(metodo, bandeira, tipo_operacao, parcelas, antecipacao
     return 0.0
 
   if metodo == "Link de Pagamento":
-    # Tabela exata do Link de Pagamento (Imagem 4)
     taxas_link = {
         1: 4.20,
         2: 6.09,
@@ -133,9 +152,8 @@ def calcular_taxa_maquina(metodo, bandeira, tipo_operacao, parcelas, antecipacao
 
   if metodo == "Cartão Físico (Máquina)":
     taxa_base = 0.0
-
-    # Adição do percentual de antecipação (Imagem 1)
     taxa_antecipacao = 0.0
+
     if antecipacao == "Automática (+1,79%)":
       taxa_antecipacao = 1.79
     elif antecipacao == "Eventual (+2,49%)":
@@ -149,10 +167,7 @@ def calcular_taxa_maquina(metodo, bandeira, tipo_operacao, parcelas, antecipacao
           "Amex": 0.0,
           "Cabal": 1.90,
       }
-      taxa_base = dict_debito.get(bandeira, 1.50)
-      return (
-          taxa_base  # Débito geralmente não aplica antecipação de crédito
-      )
+      return dict_debito.get(bandeira, 1.50)
 
     elif tipo_operacao == "Crédito à Vista (1x)":
       dict_vista = {
@@ -174,7 +189,7 @@ def calcular_taxa_maquina(metodo, bandeira, tipo_operacao, parcelas, antecipacao
             "Cabal": 3.78,
         }
         taxa_base = dict_2a6.get(bandeira, 2.00)
-      else:  # 7x a 12x/21x
+      else:
         dict_7a12 = {
             "Mastercard": 4.00,
             "Visa": 4.00,
@@ -324,28 +339,6 @@ menu = st.sidebar.radio(
     ],
 )
 
-# --- BACKUP E RESTAURAÇÃO DE BANCO DE DADOS ---
-st.sidebar.write("---")
-st.sidebar.subheader("💾 Backup dos Dados")
-
-if os.path.exists(DB_NAME):
-  with open(DB_NAME, "rb") as f:
-    st.sidebar.download_button(
-        label="📥 Baixar Backup (.db)",
-        data=f,
-        file_name="banco_vcs_backup.db",
-        mime="application/x-sqlite3",
-    )
-
-uploaded_db = st.sidebar.file_uploader(
-    "📤 Restaurar Backup", type=["db"], key="upload_db"
-)
-if uploaded_db is not None:
-  with open(DB_NAME, "wb") as f:
-    f.write(uploaded_db.getbuffer())
-  st.sidebar.success("Banco de dados restaurado com sucesso!")
-  st.rerun()
-
 if menu == "Sair":
   st.session_state["logado"] = False
   st.rerun()
@@ -365,15 +358,15 @@ if menu == "Minha Empresa":
     if st.form_submit_button("Salvar Dados"):
       if not df_empresa.empty:
         executar_query(
-            "UPDATE empresa SET nome=?, cnpj=?, telefone=? WHERE id=?",
-            (nome, cnpj, telefone, df_empresa.iloc[0]["id"]),
+            "UPDATE empresa SET nome=%s, cnpj=%s, telefone=%s WHERE id=%s",
+            (nome, cnpj, telefone, int(df_empresa.iloc[0]["id"])),
         )
       else:
         executar_query(
-            "INSERT INTO empresa (nome, cnpj, telefone) VALUES (?, ?, ?)",
+            "INSERT INTO empresa (nome, cnpj, telefone) VALUES (%s, %s, %s)",
             (nome, cnpj, telefone),
         )
-      st.success("Dados salvos com sucesso!")
+      st.success("Dados salvos com sucesso no Supabase!")
       st.rerun()
 
 # --- CLIENTES ---
@@ -389,10 +382,11 @@ elif menu == "Clientes":
       if st.form_submit_button("Cadastrar Cliente"):
         if nome:
           executar_query(
-              "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?, ?)",
+              "INSERT INTO clientes (nome, telefone, email) VALUES (%s, %s,"
+              " %s)",
               (nome, telefone, email),
           )
-          st.success("Cliente cadastrado com sucesso!")
+          st.success("Cliente cadastrado com sucesso no Supabase!")
           st.rerun()
         else:
           st.error("Por favor, preencha o nome do cliente.")
@@ -415,18 +409,19 @@ elif menu == "Clientes":
           for _, row in df_editado.iterrows():
             if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
               executar_query(
-                  "UPDATE clientes SET nome=?, telefone=?, email=? WHERE id=?",
+                  "UPDATE clientes SET nome=%s, telefone=%s, email=%s WHERE"
+                  " id=%s",
                   (
                       row.get("nome"),
                       row.get("telefone", ""),
                       row.get("email", ""),
-                      row.get("id"),
+                      int(row.get("id")),
                   ),
               )
             elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
               executar_query(
-                  "INSERT INTO clientes (nome, telefone, email) VALUES (?, ?,"
-                  " ?)",
+                  "INSERT INTO clientes (nome, telefone, email) VALUES (%s,"
+                  " %s, %s)",
                   (
                       row.get("nome"),
                       row.get("telefone", ""),
@@ -446,7 +441,7 @@ elif menu == "Clientes":
         if st.button("Confirmar Exclusão Selecionada", type="primary"):
           if clientes_para_deletar:
             for cli in clientes_para_deletar:
-              executar_query("DELETE FROM clientes WHERE nome=?", (cli,))
+              executar_query("DELETE FROM clientes WHERE nome=%s", (cli,))
             st.success("Clientes excluídos com sucesso!")
             st.rerun()
     else:
@@ -476,10 +471,10 @@ elif menu == "Cadastro de Itens":
         if nome:
           executar_query(
               "INSERT INTO itens (nome, categoria, valor_compra, valor_venda)"
-              " VALUES (?, ?, ?, ?)",
+              " VALUES (%s, %s, %s, %s)",
               (nome, categoria, valor_compra, valor_venda),
           )
-          st.success("Item cadastrado com sucesso!")
+          st.success("Item cadastrado com sucesso no Supabase!")
           st.rerun()
         else:
           st.error("Informe a descrição do item.")
@@ -508,25 +503,25 @@ elif menu == "Cadastro de Itens":
           for _, row in df_editado.iterrows():
             if pd.notna(row.get("id")) and str(row.get("id")).strip() != "":
               executar_query(
-                  "UPDATE itens SET nome=?, categoria=?, valor_compra=?,"
-                  " valor_venda=? WHERE id=?",
+                  "UPDATE itens SET nome=%s, categoria=%s, valor_compra=%s,"
+                  " valor_venda=%s WHERE id=%s",
                   (
                       row.get("nome"),
                       row.get("categoria", "Outros"),
-                      row.get("valor_compra", 0.0),
-                      row.get("valor_venda", 0.0),
-                      row.get("id"),
+                      float(row.get("valor_compra", 0.0)),
+                      float(row.get("valor_venda", 0.0)),
+                      int(row.get("id")),
                   ),
               )
             elif pd.notna(row.get("nome")) and str(row.get("nome")).strip() != "":
               executar_query(
                   "INSERT INTO itens (nome, categoria, valor_compra,"
-                  " valor_venda) VALUES (?, ?, ?, ?)",
+                  " valor_venda) VALUES (%s, %s, %s, %s)",
                   (
                       row.get("nome"),
                       row.get("categoria", "Outros"),
-                      row.get("valor_compra", 0.0),
-                      row.get("valor_venda", 0.0),
+                      float(row.get("valor_compra", 0.0)),
+                      float(row.get("valor_venda", 0.0)),
                   ),
               )
           st.success("Lista de itens atualizada com segurança!")
@@ -542,7 +537,7 @@ elif menu == "Cadastro de Itens":
         if st.button("Excluir Itens Selecionados", type="primary"):
           if itens_para_deletar:
             for item_nome in itens_para_deletar:
-              executar_query("DELETE FROM itens WHERE nome=?", (item_nome,))
+              executar_query("DELETE FROM itens WHERE nome=%s", (item_nome,))
             st.success("Itens removidos!")
             st.rerun()
     else:
@@ -607,7 +602,6 @@ elif menu == "Propostas e Orçamentos":
           v_venda_padrao = float(dados_item.get("valor_venda", 0.0))
 
           col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
-
           col1.write(f"**{item}**")
 
           qtd = col2.number_input(
@@ -618,7 +612,6 @@ elif menu == "Propostas e Orçamentos":
               key=f"qtd_{item}",
               label_visibility="collapsed",
           )
-
           col3.write(f"R$ {v_venda_padrao:.2f}")
 
           custo_compra = col4.number_input(
@@ -721,12 +714,10 @@ elif menu == "Propostas e Orçamentos":
             step=1,
         )
 
-      # Cálculo automático da porcentagem da taxa
       taxa_aplicada = calcular_taxa_maquina(
           metodo_pagamento, bandeira, tipo_operacao, parcelas, antecipacao
       )
 
-      # Exibição da Taxa Calculada
       st.info(f"💡 **Taxa Calculada da Maquininha:** `{taxa_aplicada:.2f}%`")
 
       with st.form("form_finalizar"):
@@ -758,7 +749,7 @@ elif menu == "Propostas e Orçamentos":
             executar_query(
                 """INSERT INTO orcamentos 
                                 (tipo_doc, cliente, itens, servico_desc, valor_servico, subtotal, taxa_cartao, total_final, custo_total, lucro_real, status, pagamento, parcelas, validade, data) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     tipo_doc,
                     cliente,
@@ -778,9 +769,8 @@ elif menu == "Propostas e Orçamentos":
                 ),
             )
 
-            st.success(f"{tipo_doc} gerado com sucesso!")
+            st.success(f"{tipo_doc} gerado e gravado no Supabase!")
 
-            # WhatsApp
             telefone_cliente = df_clientes[
                 df_clientes["nome"] == cliente
             ].iloc[0]["telefone"]
@@ -940,8 +930,8 @@ elif menu == "Propostas e Orçamentos":
           )
           if st.button("Atualizar Status"):
             executar_query(
-                "UPDATE orcamentos SET status=? WHERE id=?",
-                (novo_status, orcamento_id),
+                "UPDATE orcamentos SET status=%s WHERE id=%s",
+                (novo_status, int(orcamento_id)),
             )
             st.success(f"Status do Documento #{orcamento_id} atualizado!")
             st.rerun()
@@ -960,7 +950,7 @@ elif menu == "Propostas e Orçamentos":
             if docs_para_deletar:
               for doc_id in docs_para_deletar:
                 executar_query(
-                    "DELETE FROM orcamentos WHERE id=?", (doc_id,)
+                    "DELETE FROM orcamentos WHERE id=%s", (int(doc_id),)
                 )
               st.success("Documentos removidos!")
               st.rerun()
