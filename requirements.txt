@@ -3,3 +3,4 @@ supabase
 pandas
 reportlab
 fpdf2
+psycopg2-binary
