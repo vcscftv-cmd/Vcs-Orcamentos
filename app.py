@@ -14,8 +14,8 @@ st.set_page_config(
     page_icon="📄",
 )
 
-# URI padrão ou busca do Streamlit Secrets
-DEFAULT_DB_URL = "postgresql://postgres:[YOUR-PASSWORD]@db.uclqwnxvgkfdzrytiqqw.supabase.co:5432/postgres"
+# URI padrão do Supabase com senha codificada (%40 no lugar do @)
+DEFAULT_DB_URL = "postgresql://postgres.uclqwnxvgkfdzrytiqqw:Vitorsilva%40123@aws-0-sa-east-1.pooler.supabase.com:6543/postgres"
 
 
 def get_db_url():
@@ -895,11 +895,15 @@ elif menu == "Propostas e Orçamentos":
       if filtro_status != "Todos":
         df_filtrado = df_filtrado[df_filtrado["status"] == filtro_status]
 
+      # CORREÇÃO PARA COMPATIBILIDADE DE DATAS NO PANDAS / PYTHON 3.14
       if isinstance(filtro_datas, tuple) and len(filtro_datas) == 2:
         dt_inicio, dt_fim = filtro_datas
+        dt_inicio_ts = pd.Timestamp(dt_inicio)
+        dt_fim_ts = pd.Timestamp(dt_fim).replace(hour=23, minute=59, second=59)
+
         df_filtrado = df_filtrado[
-            (df_filtrado["data_dt"].dt.date >= dt_inicio)
-            & (df_filtrado["data_dt"].dt.date <= dt_fim)
+            (df_filtrado["data_dt"] >= dt_inicio_ts)
+            & (df_filtrado["data_dt"] <= dt_fim_ts)
         ]
 
       st.write("---")
